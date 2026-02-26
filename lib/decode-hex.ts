@@ -24,20 +24,26 @@ const IDENTIFIER_PATTERNS = [
   "maker_id",
 ];
 
-/** Columns where the raw hex value should be divided by RESOURCE_PRECISION */
-const PRECISION_PATTERNS = [
-  "_BALANCE",
-  "_count", // troop guard counts
-  ".count", // troop counts via dot notation
-];
+/**
+ * Columns where the raw hex value should be divided by RESOURCE_PRECISION.
+ * Verified against live data — only these are confirmed precision-scaled:
+ *   - *_BALANCE: resource balances (WHEAT_BALANCE, STONE_BALANCE, etc.)
+ *   - troop_guards.*.count / troops.count: troop unit counts
+ *   - weight.weight / weight.capacity: resource weight fields
+ *   - *.output_amount_left / *.production_rate: resource production (u128, precision-scaled)
+ */
+function needsPrecisionDivision(col: string): boolean {
+  if (col.includes("_BALANCE")) return true;
+  if (col.startsWith("weight.")) return true;
+  if (col.endsWith(".output_amount_left") || col.endsWith(".production_rate")) return true;
+  // Only troop-related .count columns — not realm_count_config.count etc.
+  if (col.endsWith(".count") && (col.startsWith("troop") || col === "troops.count")) return true;
+  return false;
+}
 
 function isIdentifierColumn(col: string): boolean {
   const lower = col.toLowerCase();
   return IDENTIFIER_PATTERNS.some((p) => lower === p || lower.endsWith(`.${p}`) || lower.endsWith(`_${p}`));
-}
-
-function needsPrecisionDivision(col: string): boolean {
-  return PRECISION_PATTERNS.some((p) => col.includes(p));
 }
 
 function decodeHexValue(value: string, col: string): string | number {
@@ -58,14 +64,27 @@ function decodeHexValue(value: string, col: string): string | number {
   }
 }
 
-export function decodeRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+export function decodeRows(
+  rows: Record<string, unknown>[],
+  opts?: { stripZeros?: boolean },
+): Record<string, unknown>[] {
+  const stripZeros = opts?.stripZeros ?? false;
   return rows.map((row) => {
     const decoded: Record<string, unknown> = {};
     for (const [col, value] of Object.entries(row)) {
+      if (col.startsWith("internal_")) continue;
       if (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value)) {
         decoded[col] = decodeHexValue(value, col);
       } else {
         decoded[col] = value;
+      }
+    }
+    if (stripZeros) {
+      for (const key of Object.keys(decoded)) {
+        const val = decoded[key];
+        if (val === 0 || val === "0" || (typeof val === "string" && /^0x0+$/.test(val))) {
+          delete decoded[key];
+        }
       }
     }
     return decoded;

@@ -17,6 +17,41 @@ export interface ToriiConnection {
 
 const EXCLUDED_PREFIXES = ["sqlite_", "search_index", "_sqlx"];
 
+function parseCreateTableSql(sql: string): ToriiColumnInfo[] {
+  const columns: ToriiColumnInfo[] = [];
+  const openParen = sql.indexOf("(");
+  const closeParen = sql.lastIndexOf(")");
+  if (openParen === -1 || closeParen === -1) return columns;
+
+  const body = sql.substring(openParen + 1, closeParen);
+  const parts = body.split(",");
+
+  for (const part of parts) {
+    const trimmed = part.trim();
+    const colMatch =
+      trimmed.match(/^"([^"]+)"\s+(\w+)(.*)$/i) ||
+      trimmed.match(/^(\w+)\s+(\w+)(.*)$/i);
+    if (!colMatch) continue;
+
+    const name = colMatch[1];
+    const type = colMatch[2].toUpperCase();
+    const rest = colMatch[3] || "";
+
+    // Skip table-level constraints
+    if (["PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "CONSTRAINT"].includes(name.toUpperCase())) continue;
+    // Skip internal bookkeeping columns
+    if (name.startsWith("internal_")) continue;
+
+    columns.push({
+      name,
+      type,
+      notnull: /NOT\s+NULL/i.test(rest),
+      pk: /PRIMARY\s+KEY/i.test(rest),
+    });
+  }
+  return columns;
+}
+
 async function toriiQuery(baseUrl: string, sql: string): Promise<Record<string, unknown>[]> {
   const url = `${baseUrl}/sql?query=${encodeURIComponent(sql)}`;
   const res = await fetch(url);
@@ -37,38 +72,15 @@ export async function connectTorii(baseUrl: string): Promise<ToriiConnection> {
   let url = baseUrl.replace(/\/+$/, "");
   url = url.replace(/\/sql\??.*$/, "").replace(/\/+$/, "");
 
-  // Fetch table list
-  const tables = await toriiQuery(url, `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`);
-  const tableNames = (tables as Array<{ name: string }>)
-    .map((t) => t.name)
-    .filter((name) => !EXCLUDED_PREFIXES.some((p) => name.startsWith(p)));
-
-  // Fetch schemas in parallel (batches of 15)
-  const result: ToriiTableInfo[] = [];
-  for (let i = 0; i < tableNames.length; i += 15) {
-    const batch = tableNames.slice(i, i + 15);
-    const schemas = await Promise.all(
-      batch.map(async (name) => {
-        try {
-          const cols = await toriiQuery(url, `PRAGMA table_info("${name}")`);
-          return {
-            name,
-            columns: (cols as Array<{ name: string; type: string; notnull: number; pk: number }>).map((c) => ({
-              name: c.name,
-              type: c.type,
-              notnull: Boolean(c.notnull),
-              pk: Boolean(c.pk),
-            })),
-          };
-        } catch {
-          return { name, columns: [] };
-        }
-      }),
-    );
-    result.push(...schemas);
+  // Single query replaces 1 table-list + N PRAGMA queries
+  const rows = await toriiQuery(url, `SELECT name, sql FROM sqlite_master WHERE type='table' ORDER BY name`);
+  const tables: ToriiTableInfo[] = [];
+  for (const row of rows as Array<{ name: string; sql: string }>) {
+    if (EXCLUDED_PREFIXES.some((p) => row.name.startsWith(p))) continue;
+    tables.push({ name: row.name, columns: parseCreateTableSql(row.sql) });
   }
 
-  return { baseUrl: url, tables: result };
+  return { baseUrl: url, tables };
 }
 
 export async function executeToriiQuery(conn: ToriiConnection, sql: string): Promise<Record<string, unknown>[]> {
@@ -97,7 +109,14 @@ export async function getToriiTableSchema(conn: ToriiConnection, tableName: stri
 
   let sampleRows: Record<string, unknown>[] = [];
   try {
-    sampleRows = await toriiQuery(conn.baseUrl, `SELECT * FROM "${tableName}" LIMIT 5`);
+    const raw = await toriiQuery(conn.baseUrl, `SELECT * FROM "${tableName}" LIMIT 5`);
+    sampleRows = raw.map((row) => {
+      const filtered: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (!key.startsWith("internal_")) filtered[key] = value;
+      }
+      return filtered;
+    });
   } catch {}
 
   return { columns, rowCount, sampleRows };

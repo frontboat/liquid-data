@@ -108,27 +108,7 @@ export function createToriiAgent() {
 
   const tables = state.tables;
 
-  // Group tables by namespace prefix for compact listing
-  const grouped: Record<string, string[]> = {};
-  for (const t of tables) {
-    const dashIdx = t.name.indexOf("-");
-    const ns = dashIdx > 0 ? t.name.substring(0, dashIdx) : "core";
-    (grouped[ns] ??= []).push(t.name);
-  }
-
-  const tableListingLines: string[] = [];
-  for (const [ns, names] of Object.entries(grouped).sort()) {
-    const entries = names.map((n) => {
-      const t = tables.find((x) => x.name === n)!;
-      return `${n} (${t.columns.length} cols)`;
-    });
-    tableListingLines.push(`[${ns}] ${names.length} tables: ${entries.join(", ")}`);
-  }
-
   const TORII_INSTRUCTIONS = `You are a data analyst assistant connected to a Torii database — an on-chain game data indexer for Eternum, an on-chain strategy game.
-
-AVAILABLE TABLES (${tables.length} total):
-${tableListingLines.join("\n")}
 
 ETERNUM DATA MODEL:
 Tables use the "s1_eternum-" prefix. Always double-quote table names: SELECT * FROM "s1_eternum-Structure"
@@ -271,7 +251,7 @@ ${explorerCatalog.prompt({
       try {
         const limited = `SELECT * FROM (${sql.replace(/;\s*$/, "")}) LIMIT 1001`;
         const results = await executeToriiQuery(limited);
-        const decoded = decodeRows(results.slice(0, 1000));
+        const decoded = decodeRows(results.slice(0, 1000), { stripZeros: true });
         return {
           rows: decoded,
           totalRows: results.length,

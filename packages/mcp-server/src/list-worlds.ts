@@ -192,7 +192,7 @@ const WORLD_CONFIG_QUERY = `SELECT "season_config.start_main_at" AS start_main_a
 async function checkWorldAvailability(worldName: string, apiBase: string): Promise<{ available: boolean; status: GameStatus }> {
   const toriiBaseUrl = `${apiBase}/x/${worldName}/torii`;
   const available = await isToriiAvailable(toriiBaseUrl);
-  if (!available) return { available: true, status: "unknown" };
+  if (!available) return { available: false, status: "unknown" };
 
   try {
     const url = `${toriiBaseUrl}/sql?query=${encodeURIComponent(WORLD_CONFIG_QUERY)}`;

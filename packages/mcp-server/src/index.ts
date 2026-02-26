@@ -18,7 +18,8 @@ server.registerTool(
     description:
       "List active Eternum game worlds across chains (slot, sepolia, mainnet). " +
       "Returns worlds that are upcoming or ongoing. Each result includes: name, chain, status, toriiUrl, and worldAddress. " +
-      "Call this first to get a toriiUrl, then pass it to query-world.\n\n" +
+      "Call this first to get a toriiUrl, then pass it to query-world. " +
+      "Note: query-world can also auto-discover worlds if no torii_url is provided.\n\n" +
       "Example flow:\n" +
       '1. list-worlds → returns [{ name: "eternum-game-42", chain: "slot", status: "ongoing", toriiUrl: "https://api.cartridge.gg/x/eternum-game-42/torii", worldAddress: "0x..." }]\n' +
       '2. query-world({ question: "How many players?", torii_url: "https://api.cartridge.gg/x/eternum-game-42/torii" })',
@@ -70,13 +71,14 @@ server.registerTool(
     title: "Query an Eternum World",
     description:
       "Ask a natural-language question about on-chain game data in an Eternum world. " +
-      "Requires a Torii URL — get one by calling list-worlds first.\n\n" +
-      "Example:\n" +
-      'query-world({ question: "What are the top 5 players by resource count?", torii_url: "https://api.cartridge.gg/x/eternum-game-42/torii" })\n\n' +
+      "Optionally provide a Torii URL to connect directly, or omit it to let the agent discover active worlds automatically.\n\n" +
+      "Examples:\n" +
+      'query-world({ question: "What are the top 5 players by resource count?", torii_url: "https://api.cartridge.gg/x/eternum-game-42/torii" })\n' +
+      'query-world({ question: "How many players?" })  // auto-discovers worlds\n\n' +
       "Returns a detailed natural-language answer with the relevant data.",
     inputSchema: z.object({
       question: z.string().describe("Natural language question about the world's data"),
-      torii_url: z.string().url().describe("Torii URL for the world (get this from list-worlds)"),
+      torii_url: z.string().url().optional().describe("Torii URL for the world. If omitted, the agent discovers active worlds automatically."),
     }),
     annotations: {
       readOnlyHint: true,
@@ -85,7 +87,7 @@ server.registerTool(
       openWorldHint: true,
     },
   },
-  async ({ question, torii_url }) => {
+  async ({ question, torii_url }: { question: string; torii_url?: string }) => {
     try {
       const answer = await queryWorld(question, torii_url);
       return {
