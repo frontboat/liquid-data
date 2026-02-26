@@ -145,6 +145,12 @@ async function runHttp() {
     res.status(405).set("Allow", "POST").json({ error: "Method Not Allowed. Use POST for MCP requests." });
   });
 
+  // Catch-all: return JSON for unmatched routes so MCP client OAuth
+  // probes (e.g. POST /register) get a parseable response instead of HTML
+  app.use((_req, res) => {
+    res.status(404).json({ error: "Not found" });
+  });
+
   const port = parseInt(process.env.PORT || "3001");
   app.listen(port, () => {
     console.error(`Data Explorer MCP server running on http://localhost:${port}/mcp`);
