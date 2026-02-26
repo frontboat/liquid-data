@@ -185,8 +185,8 @@ function UploadZone({ onUpload }: { onUpload: (info: DatasetInfo) => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = useCallback(async (file: File) => {
-    if (!file.name.match(/\.(csv|tsv|json)$/i)) {
-      setError("Please upload a CSV or JSON file");
+    if (!file.name.match(/\.(csv|tsv|json|parquet|xlsx)$/i)) {
+      setError("Please upload a CSV, JSON, Parquet, or Excel file");
       return;
     }
     setUploading(true);
@@ -247,15 +247,15 @@ function UploadZone({ onUpload }: { onUpload: (info: DatasetInfo) => void }) {
             <div className="flex flex-col items-center gap-3">
               <Upload className="h-8 w-8 text-muted-foreground" />
               <div>
-                <p className="text-sm font-medium">Drop a CSV or JSON file here, or click to browse</p>
-                <p className="text-xs text-muted-foreground mt-1">Supports CSV, TSV, and JSON files</p>
+                <p className="text-sm font-medium">Drop a file here, or click to browse</p>
+                <p className="text-xs text-muted-foreground mt-1">Supports CSV, TSV, JSON, Parquet, and Excel files</p>
               </div>
             </div>
           )}
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.tsv,.json"
+            accept=".csv,.tsv,.json,.parquet,.xlsx"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];

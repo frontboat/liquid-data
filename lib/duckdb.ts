@@ -11,34 +11,44 @@ async function getConnection() {
   return connection;
 }
 
-export type FileFormat = "csv" | "json";
+export type FileFormat = "csv" | "json" | "parquet" | "xlsx";
 
-function detectFormat(filename: string, content: string): FileFormat {
-  if (filename.endsWith(".json")) return "json";
-  if (filename.endsWith(".csv") || filename.endsWith(".tsv")) return "csv";
-  // Sniff content
-  const trimmed = content.trimStart();
-  if (trimmed.startsWith("[") || trimmed.startsWith("{")) return "json";
+const FORMAT_CONFIG: Record<FileFormat, { ext: string; reader: string }> = {
+  csv: { ext: ".csv", reader: "read_csv_auto" },
+  json: { ext: ".json", reader: "read_json_auto" },
+  parquet: { ext: ".parquet", reader: "read_parquet" },
+  xlsx: { ext: ".xlsx", reader: "read_xlsx" },
+};
+
+function detectFormat(filename: string): FileFormat {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".json")) return "json";
+  if (lower.endsWith(".parquet")) return "parquet";
+  if (lower.endsWith(".xlsx")) return "xlsx";
   return "csv";
 }
 
 export async function initDatabase(
-  content: string,
+  data: Buffer,
   tableName: string = "data",
   filename: string = "upload.csv",
 ) {
   const conn = await getConnection();
   await conn.run(`DROP TABLE IF EXISTS ${tableName}`);
 
-  const format = detectFormat(filename, content);
-  const reader = format === "json" ? "read_json_auto" : "read_csv_auto";
+  const format = detectFormat(filename);
+  const { ext, reader } = FORMAT_CONFIG[format];
+
+  if (format === "xlsx") {
+    await conn.run("INSTALL excel");
+    await conn.run("LOAD excel");
+  }
 
   const fs = await import("fs");
   const path = await import("path");
   const os = await import("os");
-  const ext = format === "json" ? ".json" : ".csv";
   const tmpFile = path.join(os.tmpdir(), `duckdb_upload_${Date.now()}${ext}`);
-  fs.writeFileSync(tmpFile, content, "utf-8");
+  fs.writeFileSync(tmpFile, data);
 
   try {
     await conn.run(`CREATE TABLE ${tableName} AS SELECT * FROM ${reader}('${tmpFile}')`);
