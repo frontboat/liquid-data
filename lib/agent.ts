@@ -3,10 +3,10 @@ import { gateway } from "@ai-sdk/gateway";
 import { tool } from "ai";
 import { z } from "zod";
 import { explorerCatalog } from "./render/catalog";
-import { executeQuery, getTableSchema } from "./duckdb";
-import { executeToriiQuery, getToriiTableSchema, getToriiState } from "./torii";
+import { executeQuery, getTableSchema as getTableSchemaApi } from "./duckdb";
+import { executeToriiQuery, getToriiTableSchema as getToriiTableSchemaApi, getToriiState } from "./torii";
 import { decodeRows } from "./decode-hex";
-import { listWorlds } from "./list-worlds";
+import { listWorlds as listWorldsApi } from "./list-worlds";
 
 const DEFAULT_MODEL = "anthropic/claude-haiku-4.5";
 
@@ -86,7 +86,7 @@ ${explorerCatalog.prompt({
     inputSchema: z.object({}),
     execute: async () => {
       try {
-        return await getTableSchema("data");
+        return await getTableSchemaApi("data");
       } catch (error) {
         return { error: String(error) };
       }
@@ -175,6 +175,12 @@ Addresses: stored as 0x-prefixed 64-char padded hex strings (left as-is in query
 Hex decoding is automatic: the queryData tool converts 0x hex values to numbers for you.
   Resource balances (*_BALANCE) and troop counts (*_count, .count) are divided by RESOURCE_PRECISION (1,000,000,000) so you see actual amounts (e.g. 5 stone, not 5000000000).
   Address/entity/owner columns stay as hex strings.
+IMPORTANT — filtering/sorting on hex columns: balance and count columns are stored as hex strings in the DB.
+  To filter or sort by actual amounts, decode in a subquery first:
+  SELECT * FROM (
+    SELECT *, CAST(STONE_BALANCE AS INTEGER) / 1000000000 AS stone FROM "s1_eternum-Resource"
+  ) WHERE stone > 42 ORDER BY stone DESC
+  Always use this pattern when comparing or ordering by resource/troop amounts.
 Timestamps: mix of game ticks (numeric) and unix seconds — check column names for context.
 
 WORKFLOW:
@@ -246,7 +252,7 @@ ${explorerCatalog.prompt({
     }),
     execute: async ({ tableName }) => {
       try {
-        return await getToriiTableSchema(tableName);
+        return await getToriiTableSchemaApi(tableName);
       } catch (error) {
         return { error: String(error) };
       }
@@ -291,7 +297,7 @@ ${explorerCatalog.prompt({
     }),
     execute: async ({ chain }) => {
       try {
-        const worlds = await listWorlds({ chain });
+        const worlds = await listWorldsApi({ chain });
         if (worlds.length === 0) {
           return { summary: "No active worlds found." + (chain ? ` (filtered to ${chain})` : "") };
         }
