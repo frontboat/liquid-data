@@ -224,9 +224,6 @@ function UploadZone({ onUpload }: { onUpload: (info: DatasetInfo) => void }) {
         <div className="text-center space-y-2">
           <Database className="h-12 w-12 mx-auto text-muted-foreground" />
           <h2 className="text-2xl font-semibold tracking-tight">Liquid Data</h2>
-          <p className="text-muted-foreground">
-            Upload a CSV or JSON file, then ask natural language questions to explore your data with interactive dashboards.
-          </p>
         </div>
 
         <div
