@@ -14,11 +14,15 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import {
   ArrowDown,
   ArrowUp,
+  Check,
+  ChevronDown,
   ChevronRight,
+  Copy,
   Globe,
   Loader2,
   LogOut,
   Sparkles,
+  Terminal,
   Upload,
   Database,
   X,
@@ -183,6 +187,95 @@ function MessageBubble({
 }
 
 // =============================================================================
+// MCP Install Button
+// =============================================================================
+
+const MCP_URL = "https://torii.up.railway.app/mcp";
+
+const MCP_OPTIONS = [
+  {
+    label: "Claude Code",
+    description: "Run in terminal",
+    icon: Terminal,
+    value: `claude mcp add data-explorer --transport http ${MCP_URL}`,
+  },
+  {
+    label: "Cursor",
+    description: "Add to .cursor/mcp.json",
+    icon: Copy,
+    value: JSON.stringify({ mcpServers: { "data-explorer": { url: MCP_URL } } }, null, 2),
+  },
+  {
+    label: "VS Code",
+    description: "Add to .vscode/mcp.json",
+    icon: Copy,
+    value: JSON.stringify({ servers: { "data-explorer": { type: "http", url: MCP_URL } } }, null, 2),
+  },
+  {
+    label: "MCP URL",
+    description: "Copy server URL",
+    icon: Globe,
+    value: MCP_URL,
+  },
+];
+
+function McpInstallButton() {
+  const [open, setOpen] = useState(false);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    if (open) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const handleCopy = useCallback((value: string, idx: number) => {
+    navigator.clipboard.writeText(value);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx(null), 2000);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative w-full">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+      >
+        <Copy className="h-4 w-4" />
+        Install MCP Server
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute bottom-full left-0 right-0 mb-2 rounded-xl border border-border bg-card shadow-lg overflow-hidden z-50">
+          {MCP_OPTIONS.map((opt, i) => (
+            <button
+              key={opt.label}
+              onClick={() => handleCopy(opt.value, i)}
+              className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-accent transition-colors"
+            >
+              <opt.icon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">{opt.label}</p>
+                <p className="text-xs text-muted-foreground">{opt.description}</p>
+              </div>
+              {copiedIdx === i ? (
+                <Check className="h-4 w-4 text-green-500 flex-shrink-0" />
+              ) : (
+                <Copy className="h-3.5 w-3.5 text-muted-foreground/0 group-hover:text-muted-foreground flex-shrink-0" />
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
 // Upload Zone
 // =============================================================================
 
@@ -257,7 +350,7 @@ function UploadZone({ onUpload }: { onUpload: (info: DatasetInfo) => void }) {
   }, [handleFile]);
 
   return (
-    <div className="h-full flex flex-col items-center justify-center px-6 py-12">
+    <div className="flex-1 overflow-auto flex flex-col items-center justify-center px-6 py-8 sm:py-12">
       <div className="max-w-xl w-full space-y-6">
         <div className="text-center space-y-2">
           <Database className="h-12 w-12 mx-auto text-muted-foreground" />
@@ -343,6 +436,8 @@ function UploadZone({ onUpload }: { onUpload: (info: DatasetInfo) => void }) {
             {error}
           </div>
         )}
+
+        <McpInstallButton />
       </div>
     </div>
   );
