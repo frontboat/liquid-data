@@ -120,6 +120,17 @@ export function decodeRows(
         decoded[col] = value;
       }
     }
+    // Safety net: if a precision column still has a large numeric value,
+    // the agent likely used CAST() and bypassed hex decoding. Apply division.
+    for (const col of Object.keys(decoded)) {
+      if (needsPrecisionDivision(col)) {
+        const v = decoded[col];
+        const num = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+        if (Number.isFinite(num) && num >= RESOURCE_PRECISION) {
+          decoded[col] = Math.round(num / RESOURCE_PRECISION);
+        }
+      }
+    }
     if (stripZeros) {
       for (const key of Object.keys(decoded)) {
         const val = decoded[key];

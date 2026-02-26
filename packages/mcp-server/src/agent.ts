@@ -51,7 +51,7 @@ Column conventions:
   Nested structs use dot notation: "troop_guards.delta.count", "troops.stamina.amount"
   Guard slots: delta, charlie, bravo, alpha (4 slots per structure)
   Troop fields: .category, .tier, .count, .stamina.amount, .stamina.updated_tick
-  Resource balances: columns named like STONE_BALANCE, COAL_BALANCE, etc. (hex strings — use CAST or hex conversion)
+  Resource balances: columns named like STONE_BALANCE, COAL_BALANCE, etc. (hex strings, auto-decoded by queryData)
   Resource production: STONE_PRODUCTION.building_count, .production_rate, .output_amount_left, .last_updated_at
 
 Common joins:
@@ -67,10 +67,10 @@ Hex decoding is automatic: the queryData tool converts 0x hex values to numbers 
   Address/entity/owner columns stay as hex strings.
 IMPORTANT — SELECT raw column values exactly as stored. Do NOT use CAST() or manual hex conversion in your SELECT columns.
   The queryData tool handles all decoding automatically. If you CAST or convert values in SQL, the auto-decoding cannot process them correctly.
-  Exception: use CAST only inside WHERE/ORDER BY subqueries for filtering, but always SELECT the original raw columns:
-  SELECT * FROM (
-    SELECT *, CAST(STONE_BALANCE AS INTEGER) / 1000000000 AS stone FROM "s1_eternum-Resource"
-  ) WHERE stone > 42 ORDER BY stone DESC
+  Hex columns sort lexicographically, not numerically. Always use CAST in ORDER BY:
+    SELECT "troops.count", "troops.category" FROM "s1_eternum-ExplorerTroops" ORDER BY CAST("troops.count" AS INTEGER) DESC LIMIT 5
+  For filtering, use CAST in WHERE:
+    SELECT * FROM "s1_eternum-ExplorerTroops" WHERE CAST("troops.count" AS INTEGER) > 0
 Timestamps: mix of game ticks (numeric) and unix seconds — check column names for context.`;
 
 const RESPONSE_FORMAT = `Include in your response:
@@ -244,6 +244,6 @@ ${RULES}`;
     instructions,
     tools: { queryData, getSchema, listTables, listWorlds, connectToWorld },
     stopWhen: stepCountIs(20),
-    temperature: 0.7,
+    temperature: 0.1,
   });
 }
