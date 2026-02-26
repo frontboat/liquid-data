@@ -3,23 +3,80 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
 import { z } from "zod";
-import { handleQuery } from "./query.js";
+import { queryWorld } from "./query-world.js";
+import { listWorlds } from "./list-worlds.js";
 
 const server = new McpServer({
-  name: "ask-torii",
-  version: "0.1.0",
+  name: "eternum-explorer",
+  version: "0.2.1",
 });
 
 server.registerTool(
-  "query",
+  "list-worlds",
   {
-    title: "Query Torii Database",
+    title: "List Active Eternum Worlds",
     description:
-      "Ask a question about on-chain game data in a Torii database. " +
-      "Provide a natural-language question and a Torii URL, and get back a detailed answer with the relevant data.",
+      "List active Eternum game worlds across chains (slot, sepolia, mainnet). " +
+      "Returns worlds that are upcoming or ongoing. Each result includes: name, chain, status, toriiUrl, and worldAddress. " +
+      "Call this first to get a toriiUrl, then pass it to query-world.\n\n" +
+      "Example flow:\n" +
+      '1. list-worlds → returns [{ name: "eternum-game-42", chain: "slot", status: "ongoing", toriiUrl: "https://api.cartridge.gg/x/eternum-game-42/torii", worldAddress: "0x..." }]\n' +
+      '2. query-world({ question: "How many players?", torii_url: "https://api.cartridge.gg/x/eternum-game-42/torii" })',
     inputSchema: z.object({
-      question: z.string().describe("Natural language question about the data"),
-      torii_url: z.string().url().describe("Torii instance URL (e.g. https://api.cartridge.gg/x/<world-name>/torii)"),
+      chain: z
+        .enum(["slot", "sepolia", "mainnet"])
+        .optional()
+        .describe("Filter to a single chain. If omitted, discovers across all chains."),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async ({ chain }) => {
+    try {
+      const worlds = await listWorlds({ chain });
+      if (worlds.length === 0) {
+        return {
+          content: [{ type: "text" as const, text: "No active worlds found." + (chain ? ` (filtered to ${chain})` : "") }],
+        };
+      }
+      const lines = worlds.map(
+        (w) => `- ${w.name} [${w.chain}] (${w.status})\n  torii_url: ${w.toriiUrl}` + (w.worldAddress ? `\n  world_address: ${w.worldAddress}` : ""),
+      );
+      const text = `Found ${worlds.length} active world${worlds.length === 1 ? "" : "s"}:\n\n${lines.join("\n\n")}`;
+      return {
+        content: [{ type: "text" as const, text }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error listing worlds: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  "query-world",
+  {
+    title: "Query an Eternum World",
+    description:
+      "Ask a natural-language question about on-chain game data in an Eternum world. " +
+      "Requires a Torii URL — get one by calling list-worlds first.\n\n" +
+      "Example:\n" +
+      'query-world({ question: "What are the top 5 players by resource count?", torii_url: "https://api.cartridge.gg/x/eternum-game-42/torii" })\n\n' +
+      "Returns a detailed natural-language answer with the relevant data.",
+    inputSchema: z.object({
+      question: z.string().describe("Natural language question about the world's data"),
+      torii_url: z.string().url().describe("Torii URL for the world (get this from list-worlds)"),
     }),
     annotations: {
       readOnlyHint: true,
@@ -30,13 +87,19 @@ server.registerTool(
   },
   async ({ question, torii_url }) => {
     try {
-      const answer = await handleQuery(question, torii_url);
+      const answer = await queryWorld(question, torii_url);
       return {
         content: [{ type: "text" as const, text: answer }],
       };
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Provide actionable guidance when the Torii URL fails
+      const isConnectionError = message.includes("failed") || message.includes("ECONNREFUSED") || message.includes("fetch");
+      const hint = isConnectionError
+        ? " This Torii URL may be unreachable or invalid — call list-worlds to find active URLs."
+        : "";
       return {
-        content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
+        content: [{ type: "text" as const, text: `Error: ${message}${hint}` }],
         isError: true,
       };
     }

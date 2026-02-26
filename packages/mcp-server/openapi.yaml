@@ -1,8 +1,8 @@
 openapi: "3.0.3"
 info:
-  title: Data Explorer MCP Server
-  description: MCP (Model Context Protocol) server for querying Torii databases via natural language.
-  version: "0.1.0"
+  title: Eternum Explorer MCP Server
+  description: MCP server for discovering and querying Eternum game worlds via natural language.
+  version: "0.2.1"
 servers:
   - url: https://asktorii.com
 paths:

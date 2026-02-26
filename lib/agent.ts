@@ -5,6 +5,8 @@ import { z } from "zod";
 import { explorerCatalog } from "./render/catalog";
 import { executeQuery, getTableSchema } from "./duckdb";
 import { executeToriiQuery, getToriiTableSchema, getToriiState } from "./torii";
+import { decodeRows } from "./decode-hex";
+import { listWorlds } from "./list-worlds";
 
 const DEFAULT_MODEL = "anthropic/claude-haiku-4.5";
 
@@ -78,7 +80,7 @@ ${explorerCatalog.prompt({
     },
   });
 
-  const getSchemaTool = tool({
+  const getSchema = tool({
     description:
       "Get the schema of the uploaded data table, including column names, types, row count, and sample rows.",
     inputSchema: z.object({}),
@@ -94,7 +96,7 @@ ${explorerCatalog.prompt({
   return new ToolLoopAgent({
     model: gateway(process.env.AI_GATEWAY_MODEL || DEFAULT_MODEL),
     instructions: AGENT_INSTRUCTIONS,
-    tools: { queryData, getSchema: getSchemaTool },
+    tools: { queryData, getSchema },
     stopWhen: stepCountIs(8),
     temperature: 0.7,
   });
@@ -123,10 +125,57 @@ export function createToriiAgent() {
     tableListingLines.push(`[${ns}] ${names.length} tables: ${entries.join(", ")}`);
   }
 
-  const TORII_INSTRUCTIONS = `You are a data analyst assistant connected to a Torii database — an on-chain game data indexer.
+  const TORII_INSTRUCTIONS = `You are a data analyst assistant connected to a Torii database — an on-chain game data indexer for Eternum, an on-chain strategy game.
 
 AVAILABLE TABLES (${tables.length} total):
 ${tableListingLines.join("\n")}
+
+ETERNUM DATA MODEL:
+Tables use the "s1_eternum-" prefix. Always double-quote table names: SELECT * FROM "s1_eternum-Structure"
+
+Entity relationships:
+  Player (address) → owns Structures (via owner field)
+  Structure (entity_id) → owns Explorers (via ExplorerTroops.owner = structure.entity_id)
+  Player → Guild (via GuildMember.member = player_address, GuildMember.guild_id = Guild.guild_id)
+
+Structure categories (category column):
+  1 = Realm, 2 = Hyperstructure, 3 = Bank, 4 = Mine, 5 = Village
+
+Key tables and what they store:
+  "s1_eternum-Structure" — all buildings (coords, owner, category, level, metadata)
+  "s1_eternum-Resource" — resource balances per entity (join on entity_id)
+  "s1_eternum-ExplorerTroops" — armies/explorers (coords, troops, owner=structure entity_id)
+  "s1_eternum-AddressName" — player display names
+  "s1_eternum-Guild" / "s1_eternum-GuildMember" — guild info
+  "s1_eternum-Hyperstructure" / "s1_eternum-HyperstructureShareholders" — hyperstructure ownership
+  "s1_eternum-BattleEvent" / "s1_eternum-ExplorerNewRaidEvent" — combat logs
+  "s1_eternum-PlayerRegisteredPoints" — leaderboard points (hex-encoded)
+  "s1_eternum-Building" / "s1_eternum-StructureBuildings" — buildings within structures
+  "s1_eternum-StoryEvent" — game event log (filtered by "story" column for event type)
+  "s1_eternum-TileOpt" — map tiles
+  "s1_eternum-WorldConfig" — season config (start/end timestamps)
+  "s1_eternum-RelicEffect" — relic modifiers on entities
+  "s1_eternum-StructureOwnerStats" — aggregated player stats
+
+Column conventions:
+  Coordinates: "base.coord_x", "base.coord_y" (structures) or "coord.x", "coord.y" (explorers)
+  Nested structs use dot notation: "troop_guards.delta.count", "troops.stamina.amount"
+  Guard slots: delta, charlie, bravo, alpha (4 slots per structure)
+  Troop fields: .category, .tier, .count, .stamina.amount, .stamina.updated_tick
+  Resource balances: columns named like STONE_BALANCE, COAL_BALANCE, etc. (hex strings — use CAST or hex conversion)
+  Resource production: STONE_PRODUCTION.building_count, .production_rate, .output_amount_left, .last_updated_at
+
+Common joins:
+  Structure + Resources: JOIN "s1_eternum-Resource" r ON s.entity_id = r.entity_id
+  Structure + Owner stats: JOIN "s1_eternum-StructureOwnerStats" sos ON sos.owner = s.owner
+  Explorer + Owner structure: JOIN "s1_eternum-Structure" s ON s.entity_id = et.owner
+  Guild lookup: JOIN "s1_eternum-GuildMember" gm ON gm.member = s.owner JOIN "s1_eternum-Guild" g ON g.guild_id = gm.guild_id
+
+Addresses: stored as 0x-prefixed 64-char padded hex strings (left as-is in query results).
+Hex decoding is automatic: the queryData tool converts 0x hex values to numbers for you.
+  Resource balances (*_BALANCE) and troop counts (*_count, .count) are divided by RESOURCE_PRECISION (1,000,000,000) so you see actual amounts (e.g. 5 stone, not 5000000000).
+  Address/entity/owner columns stay as hex strings.
+Timestamps: mix of game ticks (numeric) and unix seconds — check column names for context.
 
 WORKFLOW:
 1. Use the listTables tool to browse available tables (with optional name filter)
@@ -134,6 +183,11 @@ WORKFLOW:
 3. Use the queryData tool to run SQL queries against the database
 4. Respond with a brief conversational summary of what you found
 5. Then output a \`\`\`spec fence with a JSONL UI spec to render a rich visual dashboard
+
+DISCOVERING OTHER WORLDS:
+- If the user asks about other worlds, active games, or available Eternum instances, use the listWorlds tool.
+- It returns a list of active worlds with: name, chain, status (upcoming/ongoing), toriiUrl, and worldAddress.
+- Present the results to the user so they can choose which world to explore.
 
 RULES:
 - ALWAYS query the data first. NEVER make up numbers or guess values.
@@ -184,7 +238,7 @@ ${explorerCatalog.prompt({
     },
   });
 
-  const getSchemaTool = tool({
+  const getSchema = tool({
     description:
       "Get the full schema of a specific table: column names, types, row count, and 5 sample rows. Use this before querying an unfamiliar table.",
     inputSchema: z.object({
@@ -201,7 +255,9 @@ ${explorerCatalog.prompt({
 
   const queryData = tool({
     description:
-      "Execute a SQL query against the Torii database (SQLite dialect). Double-quote table names with hyphens. Returns up to 1000 rows.",
+      "Execute a SQL query against the Torii database (SQLite dialect). Double-quote table names with hyphens. Returns up to 1000 rows. " +
+      "Hex values are auto-decoded: resource balances and troop counts are divided by RESOURCE_PRECISION (1e9) to give actual amounts. " +
+      "Address/entity columns are left as hex strings.",
     inputSchema: z.object({
       sql: z.string().describe("SQL query (SQLite dialect). Double-quote table names with hyphens."),
     }),
@@ -209,8 +265,9 @@ ${explorerCatalog.prompt({
       try {
         const limited = `SELECT * FROM (${sql.replace(/;\s*$/, "")}) LIMIT 1001`;
         const results = await executeToriiQuery(limited);
+        const decoded = decodeRows(results.slice(0, 1000));
         return {
-          rows: results.slice(0, 1000),
+          rows: decoded,
           totalRows: results.length,
           truncated: results.length > 1000,
         };
@@ -220,10 +277,38 @@ ${explorerCatalog.prompt({
     },
   });
 
+  const listWorlds = tool({
+    description:
+      "List active Eternum game worlds across chains (slot, sepolia, mainnet). " +
+      "Returns worlds that are upcoming or ongoing, with their name, chain, status, and toriiUrl. " +
+      "Use when the user asks about other worlds, active games, or available Eternum instances. " +
+      "Present the results so the user can choose which world to explore.",
+    inputSchema: z.object({
+      chain: z
+        .enum(["slot", "sepolia", "mainnet"])
+        .optional()
+        .describe("Filter to a single chain. If omitted, discovers across all chains."),
+    }),
+    execute: async ({ chain }) => {
+      try {
+        const worlds = await listWorlds({ chain });
+        if (worlds.length === 0) {
+          return { summary: "No active worlds found." + (chain ? ` (filtered to ${chain})` : "") };
+        }
+        const lines = worlds.map(
+          (w) => `- ${w.name} [${w.chain}] (${w.status})\n  toriiUrl: ${w.toriiUrl}` + (w.worldAddress ? `\n  worldAddress: ${w.worldAddress}` : ""),
+        );
+        return { summary: `Found ${worlds.length} active world${worlds.length === 1 ? "" : "s"}:\n\n${lines.join("\n\n")}` };
+      } catch (error) {
+        return { error: String(error) };
+      }
+    },
+  });
+
   return new ToolLoopAgent({
     model: gateway(process.env.AI_GATEWAY_MODEL || DEFAULT_MODEL),
     instructions: TORII_INSTRUCTIONS,
-    tools: { queryData, getSchema: getSchemaTool, listTables },
+    tools: { queryData, getSchema, listTables, listWorlds },
     stopWhen: stepCountIs(12),
     temperature: 0.7,
   });
