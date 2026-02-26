@@ -230,7 +230,7 @@ function UploadZone({ onUpload }: { onUpload: (info: DatasetInfo) => void }) {
         </div>
 
         <div
-          className={`border-2 border-dashed rounded-xl p-12 text-center transition-colors cursor-pointer ${
+          className={`border-2 border-dashed rounded-xl p-8 sm:p-12 text-center transition-colors cursor-pointer ${
             dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
           }`}
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -358,7 +358,7 @@ export default function DataExplorerPage() {
 
   if (!dataset) {
     return (
-      <div className="h-screen flex flex-col overflow-hidden">
+      <div className="h-dvh flex flex-col overflow-hidden">
         <header className="border-b px-6 py-3 flex items-center justify-between flex-shrink-0">
           <h1 className="text-lg font-semibold">Liquid Data</h1>
           <div className="flex items-center gap-2">
@@ -367,7 +367,7 @@ export default function DataExplorerPage() {
               className="px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex items-center gap-1.5"
             >
               <LogOut className="h-3.5 w-3.5" />
-              Logout
+              <span className="hidden sm:inline">Logout</span>
             </button>
             <ThemeToggle />
           </div>
@@ -380,7 +380,7 @@ export default function DataExplorerPage() {
   const isEmpty = messages.length === 0;
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    <div className="h-dvh flex flex-col overflow-hidden">
       {/* Header */}
       <header className="border-b px-6 py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -400,14 +400,14 @@ export default function DataExplorerPage() {
             className="px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex items-center gap-1.5"
           >
             <X className="h-3.5 w-3.5" />
-            New Dataset
+            <span className="hidden sm:inline">New Dataset</span>
           </button>
           <button
             onClick={handleLogout}
             className="px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex items-center gap-1.5"
           >
             <LogOut className="h-3.5 w-3.5" />
-            Logout
+            <span className="hidden sm:inline">Logout</span>
           </button>
           <ThemeToggle />
         </div>
@@ -450,7 +450,7 @@ export default function DataExplorerPage() {
             </div>
           </div>
         ) : (
-          <div className="max-w-4xl mx-auto px-10 py-6 space-y-6">
+          <div className="max-w-4xl mx-auto px-4 sm:px-10 py-6 space-y-6">
             {messages.map((message, index) => (
               <MessageBubble key={message.id} message={message} isLast={index === messages.length - 1} isStreaming={isStreaming} />
             ))}
