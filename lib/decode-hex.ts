@@ -2,11 +2,48 @@
  * Decodes hex values in Torii query results.
  *
  * - Converts 0x-prefixed hex strings to numbers
+ * - Decodes felt-encoded string columns (names, messages) to ASCII
  * - Divides resource balance and troop count columns by RESOURCE_PRECISION (1e9)
  * - Leaves address/entity/owner columns untouched
  */
 
 const RESOURCE_PRECISION = 1_000_000_000;
+
+/** Columns containing felt-encoded ASCII strings (e.g. player names, guild names) */
+const FELT_STRING_PATTERNS = ["name", "guild_name", "message", "story"];
+
+function isFeltStringColumn(col: string): boolean {
+  const lower = col.toLowerCase();
+  return FELT_STRING_PATTERNS.some((p) => lower === p || lower.endsWith(`.${p}`));
+}
+
+/** Decode a padded felt (hex or decimal) to an ASCII string */
+export function decodePaddedFeltAscii(raw: string): string {
+  if (!raw) return "";
+  // Convert decimal string to hex if needed
+  let hex: string;
+  if (raw.startsWith("0x") || raw.startsWith("0X")) {
+    hex = raw.slice(2);
+  } else {
+    try {
+      hex = BigInt(raw).toString(16);
+    } catch {
+      return raw;
+    }
+  }
+  if (hex === "0") return "";
+
+  // Pad to even length
+  if (hex.length % 2 !== 0) hex = "0" + hex;
+
+  let out = "";
+  for (let i = 0; i < hex.length; i += 2) {
+    const byte = parseInt(hex.slice(i, i + 2), 16);
+    if (byte === 0) continue;
+    out += String.fromCharCode(byte);
+  }
+  return out;
+}
 
 /** Columns that are identifiers — hex but should stay as strings */
 const IDENTIFIER_PATTERNS = [
@@ -48,6 +85,7 @@ function isIdentifierColumn(col: string): boolean {
 
 function decodeHexValue(value: string, col: string): string | number {
   if (isIdentifierColumn(col)) return value;
+  if (isFeltStringColumn(col)) return decodePaddedFeltAscii(value);
 
   try {
     const n = BigInt(value);

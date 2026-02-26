@@ -6,16 +6,20 @@ import { ToriiConnection, connectTorii, executeToriiQuery, getToriiTableSchema a
 import { decodeRows } from "./decode-hex.js";
 import { listWorlds as listWorldsApi } from "./list-worlds.js";
 
-export function createMcpAgent(initialConn?: ToriiConnection) {
-  const state: { conn: ToriiConnection | null } = { conn: initialConn ?? null };
+function compactTableListing(tables: ToriiConnection["tables"]): string {
+  const grouped: Record<string, string[]> = {};
+  for (const t of tables) {
+    const dashIdx = t.name.indexOf("-");
+    const ns = dashIdx > 0 ? t.name.substring(0, dashIdx) : "core";
+    (grouped[ns] ??= []).push(t.name);
+  }
+  return Object.entries(grouped)
+    .sort()
+    .map(([ns, names]) => `[${ns}] ${names.join(", ")}`)
+    .join("\n");
+}
 
-  const connectionNote = initialConn
-    ? `\nYou are already connected to ${initialConn.baseUrl} with ${initialConn.tables.length} tables.`
-    : "";
-
-  const instructions = `You are a data analyst assistant for Eternum, an on-chain strategy game. You query Torii databases — on-chain game data indexers.
-
-ETERNUM DATA MODEL:
+const DATA_MODEL = `ETERNUM DATA MODEL:
 Tables use the "s1_eternum-" prefix. Always double-quote table names: SELECT * FROM "s1_eternum-Structure"
 
 Entity relationships:
@@ -30,7 +34,7 @@ Key tables and what they store:
   "s1_eternum-Structure" — all buildings (coords, owner, category, level, metadata)
   "s1_eternum-Resource" — resource balances per entity (join on entity_id)
   "s1_eternum-ExplorerTroops" — armies/explorers (coords, troops, owner=structure entity_id)
-  "s1_eternum-AddressName" — player display names
+  "s1_eternum-AddressName" — player display names (felt-encoded, auto-decoded)
   "s1_eternum-Guild" / "s1_eternum-GuildMember" — guild info
   "s1_eternum-Hyperstructure" / "s1_eternum-HyperstructureShareholders" — hyperstructure ownership
   "s1_eternum-BattleEvent" / "s1_eternum-ExplorerNewRaidEvent" — combat logs
@@ -59,6 +63,7 @@ Common joins:
 Addresses: stored as 0x-prefixed 64-char padded hex strings (left as-is in query results).
 Hex decoding is automatic: the queryData tool converts 0x hex values to numbers for you.
   Resource balances (*_BALANCE) and troop counts (*_count, .count) are divided by RESOURCE_PRECISION (1,000,000,000) so you see actual amounts (e.g. 5 stone, not 5000000000).
+  Felt-encoded strings (name, guild_name, message, story columns) are auto-decoded to readable text.
   Address/entity/owner columns stay as hex strings.
 IMPORTANT — filtering/sorting on hex columns: balance and count columns are stored as hex strings in the DB.
   To filter or sort by actual amounts, decode in a subquery first:
@@ -66,24 +71,16 @@ IMPORTANT — filtering/sorting on hex columns: balance and count columns are st
     SELECT *, CAST(STONE_BALANCE AS INTEGER) / 1000000000 AS stone FROM "s1_eternum-Resource"
   ) WHERE stone > 42 ORDER BY stone DESC
   Always use this pattern when comparing or ordering by resource/troop amounts.
-Timestamps: mix of game ticks (numeric) and unix seconds — check column names for context.
+Timestamps: mix of game ticks (numeric) and unix seconds — check column names for context.`;
 
-WORKFLOW:
-1. Use listWorlds to discover active Eternum worlds (if not already connected)
-2. Use connectToWorld to connect to a world's Torii database
-3. Use listTables to browse available tables (with optional name filter)
-4. Use getSchema to inspect a specific table's columns, types, row count, and sample rows
-5. Use queryData to run SQL queries against the database
-6. Respond with a clear, thorough natural-language answer to the user's question
-${connectionNote}
-Include in your response:
+const RESPONSE_FORMAT = `Include in your response:
 - The specific numbers, values, or data points that answer the question
 - The data as requested by the user, and if necessary, respond with a recommendation follow-up prompt that the user could use on a session with zero context
 - Brief context on what tables/queries you used
 - If the data reveals something notable or surprising, mention it
-- Brief insight on what tables may be related for further insight
+- Brief insight on what tables may be related for further insight`;
 
-RULES:
+const RULES = `RULES:
 - ALWAYS query the data first. NEVER make up numbers or guess values.
 - Tables may be interconnected and user questions may require exploring, identifying, and retrieving loops.
 - This is SQLite dialect. NOT DuckDB or Postgres.
@@ -93,6 +90,43 @@ RULES:
 - Only select the columns you actually need.
 - For numeric formatting, round to 2 decimal places where appropriate.
 - Do NOT output any UI markup, JSON specs, or rendering instructions. Plain text only.`;
+
+export function createMcpAgent(initialConn?: ToriiConnection) {
+  const state: { conn: ToriiConnection | null } = { conn: initialConn ?? null };
+
+  // --- Build instructions based on whether we're pre-connected ---
+  let workflow: string;
+  let contextSection: string;
+
+  if (initialConn) {
+    contextSection = `\nAVAILABLE TABLES (${initialConn.tables.length}):\n${compactTableListing(initialConn.tables)}\n`;
+    workflow = `WORKFLOW:
+1. Use getSchema to inspect a table's columns, types, row count, and sample rows
+2. Use queryData to run SQL queries against the database
+3. Respond with a clear, thorough natural-language answer to the user's question
+You can also use listTables with a filter to search for tables by name.`;
+  } else {
+    contextSection = "";
+    workflow = `WORKFLOW:
+1. Use listWorlds to discover active Eternum worlds
+2. Use connectToWorld to connect to a world's Torii database
+3. Use listTables to browse available tables (with optional name filter)
+4. Use getSchema to inspect a specific table's columns, types, row count, and sample rows
+5. Use queryData to run SQL queries against the database
+6. Respond with a clear, thorough natural-language answer to the user's question`;
+  }
+
+  const instructions = `You are a data analyst assistant for Eternum, an on-chain strategy game. You query Torii databases — on-chain game data indexers.
+
+${DATA_MODEL}
+${contextSection}
+${workflow}
+
+${RESPONSE_FORMAT}
+
+${RULES}`;
+
+  // --- Tools: only include discovery tools when not pre-connected ---
 
   const listWorlds = tool({
     description:
@@ -184,7 +218,7 @@ RULES:
     description:
       "Execute a SQL query against the Torii database (SQLite dialect). Double-quote table names with hyphens. Returns up to 1000 rows. " +
       "Hex values are auto-decoded: resource balances and troop counts are divided by RESOURCE_PRECISION (1e9) to give actual amounts. " +
-      "Address/entity columns are left as hex strings.",
+      "Felt-encoded strings (name, guild_name) are decoded to readable text. Address/entity columns are left as hex strings.",
     inputSchema: z.object({
       sql: z.string().describe("SQL query (SQLite dialect). Double-quote table names with hyphens."),
     }),
@@ -205,11 +239,15 @@ RULES:
     },
   });
 
+  // Pre-connected: only data tools. Discovery mode: all tools.
+  const dataTools = { queryData, getSchema, listTables };
+  const allTools = { ...dataTools, listWorlds, connectToWorld };
+
   return new ToolLoopAgent({
     model: gateway(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
     instructions,
-    tools: { queryData, getSchema, listTables, listWorlds, connectToWorld },
-    stopWhen: stepCountIs(15),
+    tools: initialConn ? dataTools : allTools,
+    stopWhen: stepCountIs(20),
     temperature: 0.7,
   });
 }

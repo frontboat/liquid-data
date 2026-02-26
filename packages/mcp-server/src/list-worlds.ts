@@ -1,9 +1,10 @@
 /**
  * Discovers active Eternum worlds across all chains.
- * Zero dependencies — uses only built-in fetch.
  *
  * Returns: [{ name, chain, status, toriiUrl, worldAddress }, ...]
  */
+
+import { decodePaddedFeltAscii } from "./decode-hex.js";
 
 export type Chain = "slot" | "sepolia" | "mainnet";
 export type GameStatus = "upcoming" | "ongoing" | "ended" | "unknown";
@@ -21,25 +22,7 @@ export interface DiscoverWorldsOptions {
   apiBase?: string;
 }
 
-// --- Hex / felt decoding ---
-
-function decodePaddedFeltAscii(hex: string): string {
-  if (!hex) return "";
-  let h = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex;
-  if (h === "0") return "";
-
-  // Skip leading zero-byte pairs
-  let i = 0;
-  while (i + 1 < h.length && h.slice(i, i + 2) === "00") i += 2;
-
-  let out = "";
-  for (; i + 1 < h.length; i += 2) {
-    const byte = parseInt(h.slice(i, i + 2), 16);
-    if (byte === 0) continue;
-    out += String.fromCharCode(byte);
-  }
-  return out;
-}
+// --- Hex / felt encoding ---
 
 function nameToPaddedFelt(name: string): string {
   const bytes = new TextEncoder().encode(name);
