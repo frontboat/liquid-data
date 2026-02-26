@@ -239,14 +239,10 @@ ${RULES}`;
     },
   });
 
-  // Pre-connected: only data tools. Discovery mode: all tools.
-  const dataTools = { queryData, getSchema, listTables };
-  const allTools = { ...dataTools, listWorlds, connectToWorld };
-
   return new ToolLoopAgent({
     model: gateway(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
     instructions,
-    tools: initialConn ? dataTools : allTools,
+    tools: { queryData, getSchema, listTables, listWorlds, connectToWorld },
     stopWhen: stepCountIs(20),
     temperature: 0.7,
   });
