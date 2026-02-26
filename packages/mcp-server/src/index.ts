@@ -6,7 +6,7 @@ import { z } from "zod";
 import { handleQuery } from "./query.js";
 
 const server = new McpServer({
-  name: "data-explorer",
+  name: "ask-torii",
   version: "0.1.0",
 });
 
@@ -15,12 +15,11 @@ server.registerTool(
   {
     title: "Query Torii Database",
     description:
-      "Ask a natural-language question about data in a Torii database. " +
-      "Connects to the given Torii URL, inspects the schema, generates and runs SQL queries, " +
-      "and returns a natural-language answer with the relevant data.",
+      "Ask a question about on-chain game data in a Torii database. " +
+      "Provide a natural-language question and a Torii URL, and get back a detailed answer with the relevant data.",
     inputSchema: z.object({
       question: z.string().describe("Natural language question about the data"),
-      torii_url: z.string().url().describe("Base URL of the Torii instance"),
+      torii_url: z.string().url().describe("Torii instance URL (e.g. https://api.cartridge.gg/x/<world-name>/torii)"),
     }),
     annotations: {
       readOnlyHint: true,

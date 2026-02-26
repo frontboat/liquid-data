@@ -197,19 +197,19 @@ const MCP_OPTIONS = [
     label: "Claude Code",
     description: "Run in terminal",
     icon: Terminal,
-    value: `claude mcp add data-explorer --transport http ${MCP_URL}`,
+    value: `claude mcp add ask-torii --transport http ${MCP_URL}`,
   },
   {
     label: "Cursor",
     description: "Add to .cursor/mcp.json",
     icon: Copy,
-    value: JSON.stringify({ mcpServers: { "data-explorer": { url: MCP_URL } } }, null, 2),
+    value: JSON.stringify({ mcpServers: { "ask-torii": { url: MCP_URL } } }, null, 2),
   },
   {
     label: "VS Code",
     description: "Add to .vscode/mcp.json",
     icon: Copy,
-    value: JSON.stringify({ servers: { "data-explorer": { type: "http", url: MCP_URL } } }, null, 2),
+    value: JSON.stringify({ servers: { "ask-torii": { type: "http", url: MCP_URL } } }, null, 2),
   },
   {
     label: "MCP URL",
