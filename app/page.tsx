@@ -15,6 +15,7 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronRight,
+  Globe,
   Loader2,
   LogOut,
   Sparkles,
@@ -33,10 +34,16 @@ type AppDataParts = { [SPEC_DATA_PART]: SpecDataPart };
 type AppMessage = UIMessage<unknown, AppDataParts>;
 
 interface DatasetInfo {
-  filename: string;
-  rowCount: number;
-  columns: Array<{ name: string; type: string }>;
-  sampleRows: Array<Record<string, unknown>>;
+  sourceType: "file" | "torii";
+  // File mode
+  filename?: string;
+  rowCount?: number;
+  columns?: Array<{ name: string; type: string }>;
+  sampleRows?: Array<Record<string, unknown>>;
+  // Torii mode
+  toriiUrl?: string;
+  tables?: Array<{ name: string; columnCount: number }>;
+  tableCount?: number;
 }
 
 // =============================================================================
@@ -52,6 +59,7 @@ const transport = new DefaultChatTransport({ api: "/api/generate" });
 const TOOL_LABELS: Record<string, [string, string]> = {
   queryData: ["Querying data", "Queried data"],
   getSchema: ["Examining schema", "Examined schema"],
+  listTables: ["Listing tables", "Listed tables"],
 };
 
 function ToolCallDisplay({
@@ -183,6 +191,35 @@ function UploadZone({ onUpload }: { onUpload: (info: DatasetInfo) => void }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [toriiUrl, setToriiUrl] = useState("");
+  const [connectingTorii, setConnectingTorii] = useState(false);
+  const [showToriiInput, setShowToriiInput] = useState(false);
+
+  const handleToriiConnect = useCallback(async () => {
+    if (!toriiUrl.trim()) return;
+    setConnectingTorii(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/torii/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: toriiUrl.trim() }),
+      });
+      if (res.status === 401) { window.location.href = "/login"; return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Connection failed");
+      onUpload({
+        sourceType: "torii",
+        toriiUrl: toriiUrl.trim(),
+        tables: data.tables,
+        tableCount: data.tableCount,
+      });
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setConnectingTorii(false);
+    }
+  }, [toriiUrl, onUpload]);
 
   const handleFile = useCallback(async (file: File) => {
     if (!file.name.match(/\.(csv|tsv|json|parquet|xlsx)$/i)) {
@@ -199,6 +236,7 @@ function UploadZone({ onUpload }: { onUpload: (info: DatasetInfo) => void }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Upload failed");
       onUpload({
+        sourceType: "file",
         filename: data.filename,
         rowCount: data.rowCount,
         columns: data.columns,
@@ -261,6 +299,45 @@ function UploadZone({ onUpload }: { onUpload: (info: DatasetInfo) => void }) {
           />
         </div>
 
+        {/* Torii connection */}
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-border" />
+          </div>
+          <div className="relative flex justify-center text-xs">
+            <span className="bg-background px-2 text-muted-foreground">or</span>
+          </div>
+        </div>
+
+        {!showToriiInput ? (
+          <button
+            onClick={() => setShowToriiInput(true)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            <Globe className="h-4 w-4" />
+            Connect to Torii
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={toriiUrl}
+              onChange={(e) => setToriiUrl(e.target.value)}
+              placeholder="https://api.cartridge.gg/x/my-world/torii"
+              className="flex-1 rounded-xl border border-input bg-card px-3 py-2.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              onKeyDown={(e) => { if (e.key === "Enter") handleToriiConnect(); }}
+              autoFocus
+            />
+            <button
+              onClick={handleToriiConnect}
+              disabled={!toriiUrl.trim() || connectingTorii}
+              className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {connectingTorii ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
+            </button>
+          </div>
+        )}
+
         {error && (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}
@@ -280,6 +357,13 @@ const SUGGESTIONS = [
   { label: "Top values", prompt: "What are the top 10 most common values in each column?" },
   { label: "Summary stats", prompt: "Show me summary statistics (min, max, mean, median) for all numeric columns" },
   { label: "Correlations", prompt: "Are there any interesting correlations or relationships between columns?" },
+];
+
+const TORII_SUGGESTIONS = [
+  { label: "Overview", prompt: "Give me an overview of this database — what tables are available and what kind of data do they contain?" },
+  { label: "Structures", prompt: "Show me all structures, their types, levels, and owners" },
+  { label: "Recent events", prompt: "What are the most recent events or transactions recorded?" },
+  { label: "Player stats", prompt: "Show me player statistics — who are the top players and what have they achieved?" },
 ];
 
 // =============================================================================
@@ -342,11 +426,14 @@ export default function DataExplorerPage() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
   }, [handleSubmit]);
 
-  const handleReset = useCallback(() => {
+  const handleReset = useCallback(async () => {
+    if (dataset?.sourceType === "torii") {
+      await fetch("/api/torii/connect", { method: "DELETE" });
+    }
     setDataset(null);
     setMessages([]);
     setInput("");
-  }, [setMessages]);
+  }, [setMessages, dataset]);
 
   const handleLogout = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -383,12 +470,23 @@ export default function DataExplorerPage() {
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold">Liquid Data</h1>
           <div className="hidden sm:flex items-center gap-2 text-sm text-muted-foreground">
-            <Database className="h-3.5 w-3.5" />
-            <span>{dataset.filename}</span>
-            <span>·</span>
-            <span>{dataset.rowCount.toLocaleString()} rows</span>
-            <span>·</span>
-            <span>{dataset.columns.length} columns</span>
+            {dataset.sourceType === "torii" ? (
+              <>
+                <Globe className="h-3.5 w-3.5" />
+                <span>Torii</span>
+                <span>·</span>
+                <span>{dataset.tableCount} tables</span>
+              </>
+            ) : (
+              <>
+                <Database className="h-3.5 w-3.5" />
+                <span>{dataset.filename}</span>
+                <span>·</span>
+                <span>{dataset.rowCount?.toLocaleString()} rows</span>
+                <span>·</span>
+                <span>{dataset.columns?.length} columns</span>
+              </>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -418,22 +516,34 @@ export default function DataExplorerPage() {
               <div className="text-center space-y-2">
                 <h2 className="text-2xl font-semibold tracking-tight">What would you like to know?</h2>
                 <p className="text-muted-foreground">
-                  Ask questions about <strong>{dataset.filename}</strong> — the AI will query your data and build interactive visualizations.
+                  {dataset.sourceType === "torii" ? (
+                    <>Connected to Torii with <strong>{dataset.tableCount} tables</strong> — ask questions about the on-chain data.</>
+                  ) : (
+                    <>Ask questions about <strong>{dataset.filename}</strong> — the AI will query your data and build interactive visualizations.</>
+                  )}
                 </p>
               </div>
 
-              {/* Column pills */}
-              <div className="flex flex-wrap gap-1.5 justify-center">
-                {dataset.columns.map((col) => (
-                  <span key={col.name} className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted text-xs text-muted-foreground">
-                    {col.name} <span className="ml-1 opacity-50">{col.type}</span>
-                  </span>
-                ))}
+              {/* Column / Table pills */}
+              <div className="flex flex-wrap gap-1.5 justify-center max-h-40 overflow-auto">
+                {dataset.sourceType === "torii" ? (
+                  dataset.tables?.map((t) => (
+                    <span key={t.name} className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted text-xs text-muted-foreground">
+                      {t.name} <span className="ml-1 opacity-50">{t.columnCount} cols</span>
+                    </span>
+                  ))
+                ) : (
+                  dataset.columns?.map((col) => (
+                    <span key={col.name} className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted text-xs text-muted-foreground">
+                      {col.name} <span className="ml-1 opacity-50">{col.type}</span>
+                    </span>
+                  ))
+                )}
               </div>
 
               {/* Suggestions */}
               <div className="flex flex-wrap gap-2 justify-center">
-                {SUGGESTIONS.map((s) => (
+                {(dataset.sourceType === "torii" ? TORII_SUGGESTIONS : SUGGESTIONS).map((s) => (
                   <button
                     key={s.label}
                     onClick={() => handleSubmit(s.prompt)}

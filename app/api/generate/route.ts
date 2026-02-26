@@ -1,5 +1,6 @@
-import { createAgent } from "@/lib/agent";
+import { createAgent, createToriiAgent } from "@/lib/agent";
 import { getTableSchema, isDataLoaded } from "@/lib/duckdb";
+import { isToriiConnected } from "@/lib/torii";
 import {
   convertToModelMessages,
   createUIMessageStream,
@@ -21,19 +22,24 @@ export async function POST(req: Request) {
     );
   }
 
-  const loaded = await isDataLoaded();
-  if (!loaded) {
-    return new Response(
-      JSON.stringify({ error: "No data loaded. Please upload a CSV first." }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
-  }
+  let agent;
 
-  const schema = await getTableSchema("data");
-  const agent = createAgent({
-    columns: schema.columns,
-    rowCount: schema.rowCount,
-  });
+  if (isToriiConnected()) {
+    agent = createToriiAgent();
+  } else {
+    const loaded = await isDataLoaded();
+    if (!loaded) {
+      return new Response(
+        JSON.stringify({ error: "No data loaded. Please upload a file or connect to Torii first." }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    const schema = await getTableSchema("data");
+    agent = createAgent({
+      columns: schema.columns,
+      rowCount: schema.rowCount,
+    });
+  }
 
   const modelMessages = await convertToModelMessages(uiMessages);
   const result = await agent.stream({ messages: modelMessages });
