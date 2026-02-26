@@ -223,7 +223,7 @@ function UploadZone({ onUpload }: { onUpload: (info: DatasetInfo) => void }) {
       <div className="max-w-xl w-full space-y-6">
         <div className="text-center space-y-2">
           <Database className="h-12 w-12 mx-auto text-muted-foreground" />
-          <h2 className="text-2xl font-semibold tracking-tight">Liquid Data View</h2>
+          <h2 className="text-2xl font-semibold tracking-tight">Liquid Data</h2>
           <p className="text-muted-foreground">
             Upload a CSV or JSON file, then ask natural language questions to explore your data with interactive dashboards.
           </p>
@@ -360,7 +360,7 @@ export default function DataExplorerPage() {
     return (
       <div className="h-screen flex flex-col overflow-hidden">
         <header className="border-b px-6 py-3 flex items-center justify-between flex-shrink-0">
-          <h1 className="text-lg font-semibold">Liquid Data View</h1>
+          <h1 className="text-lg font-semibold">Liquid Data</h1>
           <div className="flex items-center gap-2">
             <button
               onClick={handleLogout}
@@ -384,7 +384,7 @@ export default function DataExplorerPage() {
       {/* Header */}
       <header className="border-b px-6 py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold">Liquid Data View</h1>
+          <h1 className="text-lg font-semibold">Liquid Data</h1>
           <div className="hidden sm:flex items-center gap-2 text-sm text-muted-foreground">
             <Database className="h-3.5 w-3.5" />
             <span>{dataset.filename}</span>

@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Liquid Data View",
+  title: "Liquid Data",
   description: "Upload CSV, ask questions, get interactive dashboards",
 };
 
@@ -27,6 +27,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <meta name="apple-mobile-web-app-title" content="Data View" />
       <body
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >

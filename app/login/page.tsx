@@ -90,7 +90,7 @@ export default function LoginPage() {
       <header className="border-b px-6 py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2">
           <Database className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-lg font-semibold">Liquid Data View</h1>
+          <h1 className="text-lg font-semibold">Liquid Data</h1>
         </div>
         <ThemeToggle />
       </header>
