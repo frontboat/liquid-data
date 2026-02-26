@@ -73,6 +73,7 @@ async function runHttp() {
     res.status(405).set("Allow", "POST").json({ error: "Method Not Allowed. Use POST for MCP requests." });
   });
 
+
   const port = parseInt(process.env.PORT || "3001");
   app.listen(port, () => {
     console.error(`Data Explorer MCP server running on http://localhost:${port}/mcp`);
