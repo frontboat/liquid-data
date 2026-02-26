@@ -5,7 +5,9 @@ let connection: Awaited<ReturnType<DuckDBInstance["connect"]>> | null = null;
 
 async function getConnection() {
   if (!connection) {
-    instance = await DuckDBInstance.create(":memory:");
+    instance = await DuckDBInstance.create(":memory:", {
+      max_memory: "512MB",
+    });
     connection = await instance.connect();
   }
   return connection;
@@ -59,17 +61,15 @@ export async function initDatabase(
 
 export async function executeQuery(sql: string): Promise<Record<string, unknown>[]> {
   const conn = await getConnection();
-  const result = await conn.run(sql);
-
+  const reader = await conn.startStreamThenReadAll(sql);
+  const names = reader.columnNames();
+  const jsonRows = reader.getRowsJson();
   const rows: Record<string, unknown>[] = [];
-  const reader = await result.getRows();
 
-  for (const row of reader) {
+  for (const row of jsonRows) {
     const obj: Record<string, unknown> = {};
-    for (let i = 0; i < result.columnCount; i++) {
-      const name = result.columnName(i);
-      const val = row[i];
-      obj[name] = typeof val === "bigint" ? Number(val) : val;
+    for (let i = 0; i < names.length; i++) {
+      obj[names[i]!] = row[i];
     }
     rows.push(obj);
   }
@@ -81,9 +81,9 @@ export async function getTableSchema(tableName: string = "data") {
   const conn = await getConnection();
 
   // Get column info
-  const columnsResult = await conn.run(`DESCRIBE ${tableName}`);
+  const colReader = await conn.startStreamThenReadAll(`DESCRIBE ${tableName}`);
   const columns: Array<{ name: string; type: string }> = [];
-  for (const row of await columnsResult.getRows()) {
+  for (const row of colReader.getRowsJson()) {
     columns.push({
       name: String(row[0]),
       type: String(row[1]),
@@ -91,9 +91,11 @@ export async function getTableSchema(tableName: string = "data") {
   }
 
   // Get row count
-  const countResult = await conn.run(`SELECT COUNT(*) as cnt FROM ${tableName}`);
+  const countReader = await conn.startStreamThenReadAll(
+    `SELECT COUNT(*) as cnt FROM ${tableName}`,
+  );
   let rowCount = 0;
-  for (const row of await countResult.getRows()) {
+  for (const row of countReader.getRowsJson()) {
     rowCount = Number(row[0]);
   }
 
