@@ -111,7 +111,10 @@ export function decodeRows(
     const decoded: Record<string, unknown> = {};
     for (const [col, value] of Object.entries(row)) {
       if (col.startsWith("internal_")) continue;
-      if (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value)) {
+      // Felt-string columns: decode regardless of value type (hex, number, numeric string)
+      if (isFeltStringColumn(col) && value != null) {
+        decoded[col] = decodePaddedFeltAscii(String(value));
+      } else if (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value)) {
         decoded[col] = decodeHexValue(value, col);
       } else {
         decoded[col] = value;

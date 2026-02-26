@@ -65,12 +65,12 @@ Hex decoding is automatic: the queryData tool converts 0x hex values to numbers 
   Resource balances (*_BALANCE) and troop counts (*_count, .count) are divided by RESOURCE_PRECISION (1,000,000,000) so you see actual amounts (e.g. 5 stone, not 5000000000).
   Felt-encoded strings (name, guild_name, message, story columns) are auto-decoded to readable text.
   Address/entity/owner columns stay as hex strings.
-IMPORTANT — filtering/sorting on hex columns: balance and count columns are stored as hex strings in the DB.
-  To filter or sort by actual amounts, decode in a subquery first:
+IMPORTANT — SELECT raw column values exactly as stored. Do NOT use CAST() or manual hex conversion in your SELECT columns.
+  The queryData tool handles all decoding automatically. If you CAST or convert values in SQL, the auto-decoding cannot process them correctly.
+  Exception: use CAST only inside WHERE/ORDER BY subqueries for filtering, but always SELECT the original raw columns:
   SELECT * FROM (
     SELECT *, CAST(STONE_BALANCE AS INTEGER) / 1000000000 AS stone FROM "s1_eternum-Resource"
   ) WHERE stone > 42 ORDER BY stone DESC
-  Always use this pattern when comparing or ordering by resource/troop amounts.
 Timestamps: mix of game ticks (numeric) and unix seconds — check column names for context.`;
 
 const RESPONSE_FORMAT = `Include in your response:
