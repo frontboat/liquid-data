@@ -190,7 +190,7 @@ function MessageBubble({
 // MCP Install Button
 // =============================================================================
 
-const MCP_URL = "https://torii.up.railway.app/mcp";
+const MCP_URL = "https://asktorii.com/mcp";
 
 const MCP_OPTIONS = [
   {
