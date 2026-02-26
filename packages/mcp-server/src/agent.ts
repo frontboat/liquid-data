@@ -1,5 +1,5 @@
 import { ToolLoopAgent, stepCountIs } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { gateway } from "@ai-sdk/gateway";
 import { tool } from "ai";
 import { z } from "zod";
 import { ToriiConnection, executeToriiQuery, getToriiTableSchema } from "./torii.js";
@@ -103,7 +103,7 @@ RULES:
   });
 
   return new ToolLoopAgent({
-    model: anthropic("claude-haiku-4.5"),
+    model: gateway(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
     instructions,
     tools: { queryData, getSchema: getSchemaTool, listTables },
     stopWhen: stepCountIs(12),

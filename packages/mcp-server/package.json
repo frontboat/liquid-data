@@ -12,7 +12,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.47",
+    "@ai-sdk/gateway": "^3.0.55",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "ai": "^6.0.100",
     "express": "^5.2.1",
