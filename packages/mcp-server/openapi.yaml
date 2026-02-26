@@ -38,3 +38,25 @@ paths:
             application/json:
               schema:
                 type: object
+    get:
+      operationId: mcpGet
+      summary: Method not allowed
+      description: Returns 405. MCP requests must use POST.
+      responses:
+        "405":
+          description: Method Not Allowed
+    delete:
+      operationId: mcpDelete
+      summary: Method not allowed
+      description: Returns 405. MCP requests must use POST.
+      responses:
+        "405":
+          description: Method Not Allowed
+  /.well-known/oauth-authorization-server:
+    get:
+      operationId: oauthDiscovery
+      summary: OAuth authorization server metadata
+      description: MCP clients check this endpoint for auth requirements. Returns 404 (no auth required).
+      responses:
+        "404":
+          description: Not found (no auth required)

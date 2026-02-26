@@ -64,6 +64,15 @@ async function runHttp() {
     await transport.handleRequest(req, res, req.body);
   });
 
+  // MCP spec: GET and DELETE on /mcp should return 405
+  app.get("/mcp", (_req, res) => {
+    res.status(405).set("Allow", "POST").json({ error: "Method Not Allowed. Use POST for MCP requests." });
+  });
+
+  app.delete("/mcp", (_req, res) => {
+    res.status(405).set("Allow", "POST").json({ error: "Method Not Allowed. Use POST for MCP requests." });
+  });
+
   const port = parseInt(process.env.PORT || "3001");
   app.listen(port, () => {
     console.error(`Data Explorer MCP server running on http://localhost:${port}/mcp`);
