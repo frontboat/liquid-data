@@ -38,7 +38,8 @@ function LoginForm() {
         }
 
         const from = searchParams.get("from") || "/";
-        router.replace(from);
+        const safePath = from.startsWith("/") && !from.startsWith("//") ? from : "/";
+        router.replace(safePath);
       } catch {
         setError("Network error. Please try again.");
       } finally {

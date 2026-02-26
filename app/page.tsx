@@ -312,7 +312,7 @@ export default function DataExplorerPage() {
     };
     container.addEventListener("scroll", handleScroll, { passive: true });
     return () => container.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [dataset]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;

@@ -1,16 +1,17 @@
 import { DuckDBInstance } from "@duckdb/node-api";
 
-let instance: DuckDBInstance | null = null;
-let connection: Awaited<ReturnType<DuckDBInstance["connect"]>> | null = null;
+let connectionPromise: Promise<Awaited<ReturnType<DuckDBInstance["connect"]>>> | null = null;
 
-async function getConnection() {
-  if (!connection) {
-    instance = await DuckDBInstance.create(":memory:", {
-      max_memory: "512MB",
-    });
-    connection = await instance.connect();
+function getConnection() {
+  if (!connectionPromise) {
+    connectionPromise = (async () => {
+      const instance = await DuckDBInstance.create(":memory:", {
+        max_memory: "512MB",
+      });
+      return instance.connect();
+    })();
   }
-  return connection;
+  return connectionPromise;
 }
 
 export type FileFormat = "csv" | "json" | "parquet" | "xlsx";
@@ -60,6 +61,12 @@ export async function initDatabase(
 }
 
 export async function executeQuery(sql: string): Promise<Record<string, unknown>[]> {
+  const normalized = sql.trim().replace(/^\/\*[\s\S]*?\*\/\s*/, "");
+  const firstKeyword = normalized.split(/\s+/)[0]?.toUpperCase();
+  if (!firstKeyword || !["SELECT", "WITH", "DESCRIBE", "SHOW", "EXPLAIN"].includes(firstKeyword)) {
+    throw new Error("Only read-only queries are allowed");
+  }
+
   const conn = await getConnection();
   const reader = await conn.startStreamThenReadAll(sql);
   const names = reader.columnNames();
@@ -106,9 +113,10 @@ export async function getTableSchema(tableName: string = "data") {
 }
 
 export async function isDataLoaded(): Promise<boolean> {
-  if (!connection) return false;
+  if (!connectionPromise) return false;
   try {
-    await connection.run("SELECT 1 FROM data LIMIT 1");
+    const conn = await connectionPromise;
+    await conn.run("SELECT 1 FROM data LIMIT 1");
     return true;
   } catch {
     return false;

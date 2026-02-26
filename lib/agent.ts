@@ -63,7 +63,9 @@ ${explorerCatalog.prompt({
     }),
     execute: async ({ sql }) => {
       try {
-        const results = await executeQuery(sql);
+        // Wrap in a subquery with LIMIT to prevent unbounded result sets
+        const limited = `SELECT * FROM (${sql.replace(/;\s*$/, "")}) LIMIT 1001`;
+        const results = await executeQuery(limited);
         return {
           rows: results.slice(0, 1000),
           totalRows: results.length,

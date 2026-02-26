@@ -14,6 +14,14 @@ export async function POST(req: Request) {
       });
     }
 
+    const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+    if (file.size > MAX_FILE_SIZE) {
+      return new Response(JSON.stringify({ error: "File too large (max 100MB)" }), {
+        status: 413,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
 
     if (buffer.length === 0) {
