@@ -281,18 +281,20 @@ ${RULES}`;
 
   const getNearbyTroops = tool({
     description:
-      "Get all armies sorted by distance from a player's nearest structure. " +
-      "Takes a player name, finds all their structures, then for each army calculates distance to the closest structure. " +
-      "Each row includes: player_name, address, explorer_id, troops.category, troops.tier, troops.count, coord.x, coord.y, distance, nearest_structure. " +
-      "Use this for proximity questions like 'what armies are near player X' or 'who is closest to boat'.",
+      "Get all armies sorted by distance from a player's nearest structure or army. " +
+      "Set relativeTo='structures' (default) to measure from bases, or 'troops' to measure from the player's own armies. " +
+      "Each row includes: player_name, address, explorer_id, troops.category, troops.tier, troops.count, coord.x, coord.y, distance, nearest_ref. " +
+      "Use this for proximity/threat questions like 'what armies are near player X' or 'who is closest to boat's troops'.",
     inputSchema: z.object({
       toriiUrl: z.string().url().describe("Torii URL of the world to query"),
       playerName: z.string().describe("Player name to center the search on (e.g. 'boat', 'credence0x')"),
+      relativeTo: z.enum(["structures", "troops"]).optional().describe("Measure distance from player's structures (default) or their armies"),
     }),
-    execute: async ({ toriiUrl, playerName }) => {
+    execute: async ({ toriiUrl, playerName, relativeTo }) => {
       try {
         const conn = await connectTorii(toriiUrl);
         const target = playerName.toLowerCase();
+        const mode = relativeTo ?? "structures";
 
         // 1. Find the player's address by decoding felt names
         const names = await executeToriiQuery(conn, `SELECT name, address FROM "s1_eternum-AddressName"`);
@@ -303,19 +305,39 @@ ${RULES}`;
         }
         const address = match.address as string;
 
-        // 2. Get the player's structure positions for centroid
-        const structs = await executeToriiQuery(
-          conn,
-          `SELECT "base.coord_x", "base.coord_y" FROM "s1_eternum-Structure" WHERE owner = '${address}'`,
-        );
-        if (structs.length === 0) {
-          return { error: `Player "${playerName}" has no structures.` };
+        // 2. Get reference positions — either structures or the player's own armies
+        let refPoints: Array<{ x: number; y: number; id: number }>;
+
+        if (mode === "troops") {
+          const playerTroops = await executeToriiQuery(
+            conn,
+            `SELECT et.explorer_id, et."coord.x", et."coord.y"
+             FROM "s1_eternum-ExplorerTroops" et
+             JOIN "s1_eternum-Structure" s ON s.entity_id = et.owner
+             WHERE s.owner = '${address}'`,
+          );
+          if (playerTroops.length === 0) {
+            return { error: `Player "${playerName}" has no armies.` };
+          }
+          refPoints = playerTroops.map((t) => ({
+            x: Number(t["coord.x"]),
+            y: Number(t["coord.y"]),
+            id: Number(t["explorer_id"]),
+          }));
+        } else {
+          const structs = await executeToriiQuery(
+            conn,
+            `SELECT entity_id, "base.coord_x", "base.coord_y" FROM "s1_eternum-Structure" WHERE owner = '${address}'`,
+          );
+          if (structs.length === 0) {
+            return { error: `Player "${playerName}" has no structures.` };
+          }
+          refPoints = structs.map((s) => ({
+            x: Number(s["base.coord_x"]),
+            y: Number(s["base.coord_y"]),
+            id: Number(s["entity_id"]),
+          }));
         }
-        const positions = structs.map((s) => ({
-          x: Number(s["base.coord_x"]),
-          y: Number(s["base.coord_y"]),
-          entity_id: s["entity_id"],
-        }));
 
         // 3. Get all explorers with owner names
         const sql = `
@@ -329,29 +351,30 @@ ${RULES}`;
         const results = await executeToriiQuery(conn, sql);
         const decoded = decodeRows(results, { stripZeros: false });
 
-        // 4. For each army, find distance to the CLOSEST structure
+        // 4. For each army, find distance to the CLOSEST reference point
         const withDistance = decoded.map((row) => {
           const ex = Number(row["coord.x"]);
           const ey = Number(row["coord.y"]);
           let minDist = Infinity;
-          let nearestStructure: number | undefined;
-          for (const s of positions) {
-            const d = Math.sqrt((ex - s.x) ** 2 + (ey - s.y) ** 2);
+          let nearestRef: number | undefined;
+          for (const ref of refPoints) {
+            const d = Math.sqrt((ex - ref.x) ** 2 + (ey - ref.y) ** 2);
             if (d < minDist) {
               minDist = d;
-              nearestStructure = s.entity_id as number;
+              nearestRef = ref.id;
             }
           }
           return {
             ...row,
             distance: Math.round(minDist * 10) / 10,
-            nearest_structure: nearestStructure,
+            nearest_ref: nearestRef,
           };
         });
         withDistance.sort((a, b) => a.distance - b.distance);
 
         return {
-          structures: positions,
+          relativeTo: mode,
+          referencePoints: refPoints,
           troops: withDistance,
           totalExplorers: withDistance.length,
         };
