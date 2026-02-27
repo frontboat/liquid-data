@@ -17,6 +17,9 @@ export interface ToriiConnection {
 
 const EXCLUDED_PREFIXES = ["sqlite_", "search_index", "_sqlx"];
 
+// Module-level cache: connectTorii won't re-fetch sqlite_master for the same URL
+const connectionCache = new Map<string, ToriiConnection>();
+
 function parseCreateTableSql(sql: string): ToriiColumnInfo[] {
   const columns: ToriiColumnInfo[] = [];
   const openParen = sql.indexOf("(");
@@ -72,6 +75,10 @@ export async function connectTorii(baseUrl: string): Promise<ToriiConnection> {
   let url = baseUrl.replace(/\/+$/, "");
   url = url.replace(/\/sql\??.*$/, "").replace(/\/+$/, "");
 
+  // Return cached connection if available
+  const cached = connectionCache.get(url);
+  if (cached) return cached;
+
   // Single query replaces 1 table-list + N PRAGMA queries
   const rows = await toriiQuery(url, `SELECT name, sql FROM sqlite_master WHERE type='table' ORDER BY name`);
   const tables: ToriiTableInfo[] = [];
@@ -80,7 +87,9 @@ export async function connectTorii(baseUrl: string): Promise<ToriiConnection> {
     tables.push({ name: row.name, columns: parseCreateTableSql(row.sql) });
   }
 
-  return { baseUrl: url, tables };
+  const conn = { baseUrl: url, tables };
+  connectionCache.set(url, conn);
+  return conn;
 }
 
 export async function executeToriiQuery(conn: ToriiConnection, sql: string): Promise<Record<string, unknown>[]> {

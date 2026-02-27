@@ -102,6 +102,9 @@ ${explorerCatalog.prompt({
   });
 }
 
+// NOTE: UI Torii agent uses 0.7 temperature because it renders UI specs
+// where some creative variance is acceptable, unlike the MCP agent (0.1)
+// which must return deterministic data answers.
 export function createToriiAgent() {
   const state = getToriiState();
   if (!state) throw new Error("Torii not connected");
@@ -125,7 +128,7 @@ Key tables and what they store:
   "s1_eternum-Structure" — all buildings (coords, owner, category, level, metadata)
   "s1_eternum-Resource" — resource balances per entity (join on entity_id)
   "s1_eternum-ExplorerTroops" — armies/explorers (coords, troops, owner=structure entity_id)
-  "s1_eternum-AddressName" — player display names
+  "s1_eternum-AddressName" — player display names (felt-encoded, auto-decoded)
   "s1_eternum-Guild" / "s1_eternum-GuildMember" — guild info
   "s1_eternum-Hyperstructure" / "s1_eternum-HyperstructureShareholders" — hyperstructure ownership
   "s1_eternum-BattleEvent" / "s1_eternum-ExplorerNewRaidEvent" — combat logs
@@ -142,7 +145,7 @@ Column conventions:
   Nested structs use dot notation: "troop_guards.delta.count", "troops.stamina.amount"
   Guard slots: delta, charlie, bravo, alpha (4 slots per structure)
   Troop fields: .category, .tier, .count, .stamina.amount, .stamina.updated_tick
-  Resource balances: columns named like STONE_BALANCE, COAL_BALANCE, etc. (hex strings — use CAST or hex conversion)
+  Resource balances: columns named like STONE_BALANCE, COAL_BALANCE, etc. (hex strings, auto-decoded by queryData)
   Resource production: STONE_PRODUCTION.building_count, .production_rate, .output_amount_left, .last_updated_at
 
 Common joins:
@@ -154,13 +157,14 @@ Common joins:
 Addresses: stored as 0x-prefixed 64-char padded hex strings (left as-is in query results).
 Hex decoding is automatic: the queryData tool converts 0x hex values to numbers for you.
   Resource balances (*_BALANCE) and troop counts (*_count, .count) are divided by RESOURCE_PRECISION (1,000,000,000) so you see actual amounts (e.g. 5 stone, not 5000000000).
+  Felt-encoded strings (name, guild_name, message, story columns) are auto-decoded to readable text.
   Address/entity/owner columns stay as hex strings.
-IMPORTANT — filtering/sorting on hex columns: balance and count columns are stored as hex strings in the DB.
-  To filter or sort by actual amounts, decode in a subquery first:
-  SELECT * FROM (
-    SELECT *, CAST(STONE_BALANCE AS INTEGER) / 1000000000 AS stone FROM "s1_eternum-Resource"
-  ) WHERE stone > 42 ORDER BY stone DESC
-  Always use this pattern when comparing or ordering by resource/troop amounts.
+IMPORTANT — SELECT raw column values exactly as stored. Do NOT use CAST() or manual hex conversion in your SELECT columns.
+  The queryData tool handles all decoding automatically. If you CAST or convert values in SQL, the auto-decoding cannot process them correctly.
+  Hex columns sort lexicographically, not numerically. Always use CAST in ORDER BY:
+    SELECT "troops.count", "troops.category" FROM "s1_eternum-ExplorerTroops" ORDER BY CAST("troops.count" AS INTEGER) DESC LIMIT 5
+  For filtering, use CAST in WHERE:
+    SELECT * FROM "s1_eternum-ExplorerTroops" WHERE CAST("troops.count" AS INTEGER) > 0
 Timestamps: mix of game ticks (numeric) and unix seconds — check column names for context.
 
 WORKFLOW:

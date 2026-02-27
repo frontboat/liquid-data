@@ -4,7 +4,6 @@ import { tool } from "ai";
 import { z } from "zod";
 import { ToriiConnection, connectTorii, executeToriiQuery, getToriiTableSchema as getToriiTableSchemaApi } from "./torii.js";
 import { decodeRows } from "./decode-hex.js";
-import { listWorlds as listWorldsApi } from "./list-worlds.js";
 
 function compactTableListing(tables: ToriiConnection["tables"]): string {
   const grouped: Record<string, string[]> = {};
@@ -89,31 +88,34 @@ const RULES = `RULES:
 - Keep queries efficient — use LIMIT, avoid SELECT * on wide tables (some have 200+ columns).
 - Only select the columns you actually need.
 - For numeric formatting, round to 2 decimal places where appropriate.
-- Do NOT output any UI markup, JSON specs, or rendering instructions. Plain text only.`;
+- Do NOT output any UI markup, JSON specs, or rendering instructions. Plain text only.
+- Every tool call requires a toriiUrl parameter. Use the URL provided in your context.`;
 
-export function createMcpAgent(initialConn?: ToriiConnection) {
-  const state: { conn: ToriiConnection | null } = { conn: initialConn ?? null };
+interface WorldInfo {
+  name: string;
+  toriiUrl: string;
+}
 
-  // --- Build instructions based on whether we're pre-connected ---
-  let workflow: string;
+export function createMcpAgent(worlds: WorldInfo[], preConnected?: { url: string; tables: ToriiConnection["tables"] }) {
   let contextSection: string;
+  let workflow: string;
 
-  if (initialConn) {
-    contextSection = `\nAVAILABLE TABLES (${initialConn.tables.length}):\n${compactTableListing(initialConn.tables)}\n`;
+  if (preConnected) {
+    contextSection = `\nCONNECTED TO: ${preConnected.url}\nAVAILABLE TABLES (${preConnected.tables.length}):\n${compactTableListing(preConnected.tables)}\n`;
     workflow = `WORKFLOW:
 1. Use getSchema to inspect a table's columns, types, row count, and sample rows
 2. Use queryData to run SQL queries against the database
 3. Respond with a clear, thorough natural-language answer to the user's question
 You can also use listTables with a filter to search for tables by name.`;
   } else {
-    contextSection = "";
+    const worldList = worlds.map((w) => `  - ${w.name}: ${w.toriiUrl}`).join("\n");
+    contextSection = `\nAVAILABLE WORLDS:\n${worldList}\n`;
     workflow = `WORKFLOW:
-1. Use listWorlds to discover active Eternum worlds
-2. Use connectToWorld to connect to a world's Torii database
-3. Use listTables to browse available tables (with optional name filter)
-4. Use getSchema to inspect a specific table's columns, types, row count, and sample rows
-5. Use queryData to run SQL queries against the database
-6. Respond with a clear, thorough natural-language answer to the user's question`;
+1. Pick the appropriate world URL from the list above
+2. Use listTables to browse available tables (with optional name filter)
+3. Use getSchema to inspect a specific table's columns, types, row count, and sample rows
+4. Use queryData to run SQL queries against the database
+5. Respond with a clear, thorough natural-language answer to the user's question`;
   }
 
   const instructions = `You are a data analyst assistant for Eternum, an on-chain strategy game. You query Torii databases — on-chain game data indexers.
@@ -126,75 +128,27 @@ ${RESPONSE_FORMAT}
 
 ${RULES}`;
 
-  // --- Tools: only include discovery tools when not pre-connected ---
-
-  const listWorlds = tool({
-    description:
-      "Discover active Eternum game worlds across chains (slot, sepolia, mainnet). " +
-      "Returns worlds with name, chain, status, and toriiUrl. Use this to find a world to connect to.",
-    inputSchema: z.object({
-      chain: z
-        .enum(["slot", "sepolia", "mainnet"])
-        .optional()
-        .describe("Filter to a single chain. If omitted, discovers across all chains."),
-    }),
-    execute: async ({ chain }) => {
-      try {
-        const worlds = await listWorldsApi({ chain });
-        if (worlds.length === 0) {
-          return { worlds: [], summary: "No active worlds found." + (chain ? ` (filtered to ${chain})` : "") };
-        }
-        return {
-          worlds: worlds.map((w) => ({ name: w.name, chain: w.chain, status: w.status, toriiUrl: w.toriiUrl })),
-          summary: `Found ${worlds.length} active world${worlds.length === 1 ? "" : "s"}.`,
-        };
-      } catch (error) {
-        return { error: String(error) };
-      }
-    },
-  });
-
-  const connectToWorld = tool({
-    description:
-      "Connect to an Eternum world's Torii database. Required before using listTables, getSchema, or queryData. " +
-      "Pass a toriiUrl from listWorlds or provided by the user.",
-    inputSchema: z.object({
-      toriiUrl: z.string().url().describe("Torii URL for the world to connect to"),
-    }),
-    execute: async ({ toriiUrl }) => {
-      try {
-        const conn = await connectTorii(toriiUrl);
-        state.conn = conn;
-        const namespaces = new Set<string>();
-        for (const t of conn.tables) {
-          const dashIdx = t.name.indexOf("-");
-          namespaces.add(dashIdx > 0 ? t.name.substring(0, dashIdx) : "core");
-        }
-        return {
-          connected: true,
-          tableCount: conn.tables.length,
-          namespaces: [...namespaces].sort(),
-        };
-      } catch (error) {
-        return { error: String(error) };
-      }
-    },
-  });
+  // --- Tools: each takes toriiUrl explicitly, no stored state ---
 
   const listTables = tool({
     description:
-      "List available tables, optionally filtered by name substring. Returns table names and column counts.",
+      "List available tables at a Torii database, optionally filtered by name substring. Returns table names and column counts.",
     inputSchema: z.object({
+      toriiUrl: z.string().url().describe("Torii URL of the world to query"),
       filter: z.string().optional().describe("Optional substring to filter table names (case-insensitive)"),
     }),
-    execute: async ({ filter }) => {
-      if (!state.conn) return { error: "Not connected. Use connectToWorld first." };
-      let filtered = state.conn.tables;
-      if (filter) {
-        const lower = filter.toLowerCase();
-        filtered = filtered.filter((t) => t.name.toLowerCase().includes(lower));
+    execute: async ({ toriiUrl, filter }) => {
+      try {
+        const conn = await connectTorii(toriiUrl);
+        let filtered = conn.tables;
+        if (filter) {
+          const lower = filter.toLowerCase();
+          filtered = filtered.filter((t) => t.name.toLowerCase().includes(lower));
+        }
+        return filtered.map((t) => ({ name: t.name, columnCount: t.columns.length }));
+      } catch (error) {
+        return { error: String(error) };
       }
-      return filtered.map((t) => ({ name: t.name, columnCount: t.columns.length }));
     },
   });
 
@@ -202,12 +156,13 @@ ${RULES}`;
     description:
       "Get the full schema of a specific table: column names, types, row count, and 5 sample rows. Use this before querying an unfamiliar table.",
     inputSchema: z.object({
+      toriiUrl: z.string().url().describe("Torii URL of the world to query"),
       tableName: z.string().describe("The exact table name to inspect"),
     }),
-    execute: async ({ tableName }) => {
-      if (!state.conn) return { error: "Not connected. Use connectToWorld first." };
+    execute: async ({ toriiUrl, tableName }) => {
       try {
-        return await getToriiTableSchemaApi(state.conn, tableName);
+        const conn = await connectTorii(toriiUrl);
+        return await getToriiTableSchemaApi(conn, tableName);
       } catch (error) {
         return { error: String(error) };
       }
@@ -216,17 +171,18 @@ ${RULES}`;
 
   const queryData = tool({
     description:
-      "Execute a SQL query against the Torii database (SQLite dialect). Double-quote table names with hyphens. Returns up to 1000 rows. " +
+      "Execute a SQL query against a Torii database (SQLite dialect). Double-quote table names with hyphens. Returns up to 1000 rows. " +
       "Hex values are auto-decoded: resource balances and troop counts are divided by RESOURCE_PRECISION (1e9) to give actual amounts. " +
       "Felt-encoded strings (name, guild_name) are decoded to readable text. Address/entity columns are left as hex strings.",
     inputSchema: z.object({
+      toriiUrl: z.string().url().describe("Torii URL of the world to query"),
       sql: z.string().describe("SQL query (SQLite dialect). Double-quote table names with hyphens."),
     }),
-    execute: async ({ sql }) => {
-      if (!state.conn) return { error: "Not connected. Use connectToWorld first.", rows: [], totalRows: 0 };
+    execute: async ({ toriiUrl, sql }) => {
       try {
+        const conn = await connectTorii(toriiUrl);
         const limited = `SELECT * FROM (${sql.replace(/;\s*$/, "")}) LIMIT 1001`;
-        const results = await executeToriiQuery(state.conn, limited);
+        const results = await executeToriiQuery(conn, limited);
         const decoded = decodeRows(results.slice(0, 1000), { stripZeros: true });
         return {
           rows: decoded,
@@ -242,7 +198,7 @@ ${RULES}`;
   return new ToolLoopAgent({
     model: gateway(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
     instructions,
-    tools: { queryData, getSchema, listTables, listWorlds, connectToWorld },
+    tools: { queryData, getSchema, listTables },
     stopWhen: stepCountIs(20),
     temperature: 0.1,
   });
