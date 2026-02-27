@@ -79,7 +79,7 @@ const RESPONSE_FORMAT = `Include in your response:
 - If the data reveals something notable or surprising, mention it
 - Brief insight on what tables may be related for further insight`;
 
-const RULES = `RULES:
+const ETERNUM_RULES = `RULES:
 - ALWAYS query the data first. NEVER make up numbers or guess values.
 - Use getPlayers for player counts, leaderboards, structure counts, points, or guild membership.
 - Use getTroops for armies, troop counts, military rankings, or explorer positions. Pass playerName to filter to one player.
@@ -97,12 +97,32 @@ const RULES = `RULES:
 - Do NOT output any UI markup, JSON specs, or rendering instructions. Plain text only.
 - Every tool call requires a toriiUrl parameter. Use the URL provided in your context.`;
 
+const GENERIC_RULES = `RULES:
+- ALWAYS query the data first. NEVER make up numbers or guess values.
+- Start with listTables to discover what data is available, then use getSchema to understand table structure.
+- Tables may be interconnected and user questions may require exploring, identifying, and retrieving loops.
+- This is SQLite dialect. NOT DuckDB or Postgres.
+- Table names containing hyphens or special chars MUST be double-quoted: SELECT * FROM "my-table"
+- Use the getSchema tool before querying an unfamiliar table to understand its columns.
+- Keep queries efficient — use LIMIT, avoid SELECT * on wide tables.
+- Only select the columns you actually need.
+- For numeric formatting, round to 2 decimal places where appropriate.
+- Do NOT output any UI markup, JSON specs, or rendering instructions. Plain text only.
+- Every tool call requires a toriiUrl parameter. Use the URL provided in your context.
+- Hex values (0x-prefixed) are auto-decoded to numbers by the queryData tool.`;
+
+function hasEternumTables(tables: ToriiConnection["tables"]): boolean {
+  return tables.some((t) => t.name.startsWith("s1_eternum-"));
+}
+
 interface WorldInfo {
   name: string;
   toriiUrl: string;
 }
 
 export function createMcpAgent(worlds: WorldInfo[], preConnected?: { url: string; tables: ToriiConnection["tables"] }) {
+  const isEternum = preConnected ? hasEternumTables(preConnected.tables) : true; // assume Eternum when auto-discovering
+
   let contextSection: string;
   let workflow: string;
 
@@ -124,15 +144,21 @@ You can also use listTables with a filter to search for tables by name.`;
 5. Respond with a clear, thorough natural-language answer to the user's question`;
   }
 
-  const instructions = `You are a data analyst assistant for Eternum, an on-chain strategy game. You query Torii databases — on-chain game data indexers.
+  const intro = isEternum
+    ? `You are a data analyst assistant for Eternum, an on-chain strategy game. You query Torii databases — on-chain game data indexers.`
+    : `You are a data analyst assistant for on-chain game data. You query Torii databases — on-chain game data indexers that store smart contract state as SQLite tables.`;
 
-${DATA_MODEL}
+  const dataModel = isEternum ? `\n${DATA_MODEL}` : "";
+  const rules = isEternum ? ETERNUM_RULES : GENERIC_RULES;
+
+  const instructions = `${intro}
+${dataModel}
 ${contextSection}
 ${workflow}
 
 ${RESPONSE_FORMAT}
 
-${RULES}`;
+${rules}`;
 
   // --- Tools: each takes toriiUrl explicitly, no stored state ---
 
@@ -415,10 +441,15 @@ ${RULES}`;
     },
   });
 
+  const baseTools = { queryData, getSchema, listTables };
+  const tools = isEternum
+    ? { ...baseTools, getPlayers, getTroops, getNearbyTroops }
+    : baseTools;
+
   return new ToolLoopAgent({
     model: gateway(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
     instructions,
-    tools: { queryData, getSchema, listTables, getPlayers, getTroops, getNearbyTroops },
+    tools,
     stopWhen: stepCountIs(20),
     temperature: 0.1,
   });

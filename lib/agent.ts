@@ -110,9 +110,9 @@ export function createToriiAgent() {
   if (!state) throw new Error("Torii not connected");
 
   const tables = state.tables;
+  const isEternum = tables.some((t) => t.name.startsWith("s1_eternum-"));
 
-  const TORII_INSTRUCTIONS = `You are a data analyst assistant connected to a Torii database — an on-chain game data indexer for Eternum, an on-chain strategy game.
-
+  const ETERNUM_DATA_MODEL = `
 ETERNUM DATA MODEL:
 Tables use the "s1_eternum-" prefix. Always double-quote table names: SELECT * FROM "s1_eternum-Structure"
 
@@ -165,8 +165,21 @@ IMPORTANT — SELECT raw column values exactly as stored. Do NOT use CAST() or m
     SELECT "troops.count", "troops.category" FROM "s1_eternum-ExplorerTroops" ORDER BY CAST("troops.count" AS INTEGER) DESC LIMIT 5
   For filtering, use CAST in WHERE:
     SELECT * FROM "s1_eternum-ExplorerTroops" WHERE CAST("troops.count" AS INTEGER) > 0
-Timestamps: mix of game ticks (numeric) and unix seconds — check column names for context.
+Timestamps: mix of game ticks (numeric) and unix seconds — check column names for context.`;
 
+  const ETERNUM_RULES = `- Use getPlayers for player counts, leaderboards, structure counts, points, or guild membership.
+- Use getTroops for armies, troop counts, military rankings, or explorer positions. Pass playerName to filter to one player.
+- Use getNearbyTroops for proximity/threat questions. Specify the reference via playerName, coords (raw DB values), or entityId.
+  - playerName + relativeTo='troops' measures from a player's armies instead of structures.
+  - Coordinates must be raw DB values (e.g. 1225670892, not relative like 892).
+- Fall back to queryData for everything else (resources, battles, events, buildings, etc.).`;
+
+  const intro = isEternum
+    ? `You are a data analyst assistant connected to a Torii database — an on-chain game data indexer for Eternum, an on-chain strategy game.`
+    : `You are a data analyst assistant connected to a Torii database — an on-chain game data indexer that stores smart contract state as SQLite tables.`;
+
+  const TORII_INSTRUCTIONS = `${intro}
+${isEternum ? ETERNUM_DATA_MODEL : ""}
 WORKFLOW:
 1. Use the listTables tool to browse available tables (with optional name filter)
 2. Use the getSchema tool to inspect a specific table's columns, types, row count, and sample rows
@@ -174,21 +187,15 @@ WORKFLOW:
 4. Respond with a brief conversational summary of what you found
 5. Then output a \`\`\`spec fence with a JSONL UI spec to render a rich visual dashboard
 
-DISCOVERING OTHER WORLDS:
+${isEternum ? `DISCOVERING OTHER WORLDS:
 - If the user asks about other worlds, active games, or available Eternum instances, use the listWorlds tool.
 - It returns a list of active worlds with: name, chain, status (upcoming/ongoing), toriiUrl, and worldAddress.
 - Present the results to the user so they can choose which world to explore.
-
-RULES:
+` : ""}RULES:
 - ALWAYS query the data first. NEVER make up numbers or guess values.
-- Use getPlayers for player counts, leaderboards, structure counts, points, or guild membership.
-- Use getTroops for armies, troop counts, military rankings, or explorer positions. Pass playerName to filter to one player.
-- Use getNearbyTroops for proximity/threat questions. Specify the reference via playerName, coords (raw DB values), or entityId.
-  - playerName + relativeTo='troops' measures from a player's armies instead of structures.
-  - Coordinates must be raw DB values (e.g. 1225670892, not relative like 892).
-- Fall back to queryData for everything else (resources, battles, events, buildings, etc.).
+${isEternum ? ETERNUM_RULES : "- Start with listTables to discover what data is available, then use getSchema to understand table structure."}
 - This is SQLite dialect. NOT DuckDB or Postgres.
-- Table names containing hyphens MUST be double-quoted: SELECT * FROM "s1_eternum-Structure"
+- Table names containing hyphens or special chars MUST be double-quoted: SELECT * FROM "my-table"
 - Use the getSchema tool before querying an unfamiliar table to understand its columns.
 - Keep queries efficient — use LIMIT, avoid SELECT * on wide tables (some have 200+ columns).
 - Only select the columns you actually need.
@@ -206,6 +213,7 @@ RULES:
 - Put chart/table data arrays in /state and reference them with { "$state": "/path" } on the data prop.
 - Always emit /state patches BEFORE the elements that reference them.
 - For numeric formatting, round to 2 decimal places where appropriate.
+- Hex values (0x-prefixed) are auto-decoded to numbers by the queryData tool.
 
 ${explorerCatalog.prompt({
     mode: "chat",
@@ -499,10 +507,15 @@ ${explorerCatalog.prompt({
     },
   });
 
+  const baseTools = { queryData, getSchema, listTables };
+  const tools = isEternum
+    ? { ...baseTools, listWorlds, getPlayers, getTroops, getNearbyTroops }
+    : baseTools;
+
   return new ToolLoopAgent({
     model: gateway(process.env.AI_GATEWAY_MODEL || DEFAULT_MODEL),
     instructions: TORII_INSTRUCTIONS,
-    tools: { queryData, getSchema, listTables, listWorlds, getPlayers, getTroops, getNearbyTroops },
+    tools,
     stopWhen: stepCountIs(12),
     temperature: 0.7,
   });

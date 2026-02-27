@@ -19,7 +19,8 @@ function createServer(): McpServer {
       description:
         "List active Eternum game worlds across chains (slot, sepolia, mainnet). " +
         "Returns worlds that are upcoming or ongoing. Each result includes: name, chain, status, toriiUrl, and worldAddress.\n\n" +
-        "Use this to find a world's torii_url, then pass it to query-world.\n\n" +
+        "Use this to find Eternum world URLs, then pass them to query-world. " +
+        "Note: query-world also accepts any Torii URL directly — you don't need list-worlds for non-Eternum instances.\n\n" +
         "Example:\n" +
         '  list-worlds → [{ name: "eternum-season-1", chain: "slot", status: "ongoing", toriiUrl: "https://api.cartridge.gg/x/eternum-season-1/torii" }]\n' +
         '  query-world({ question: "Who has the largest army?", torii_url: "https://api.cartridge.gg/x/eternum-season-1/torii" })',
@@ -68,19 +69,20 @@ function createServer(): McpServer {
   server.registerTool(
     "query-world",
     {
-      title: "Query an Eternum World",
+      title: "Query a Torii World",
       description:
-        "Ask a natural-language question about on-chain game data in an Eternum world. " +
-        "Pass a torii_url to target a specific world, or omit it to auto-discover active worlds.\n\n" +
-        "The agent queries Torii databases (SQLite) and returns a detailed natural-language answer. " +
-        "It understands Eternum's data model: structures, troops, resources, guilds, hyperstructures, battles, and more.\n\n" +
+        "Ask a natural-language question about on-chain game data indexed by a Torii instance. " +
+        "Works with any Torii URL — Eternum worlds via Cartridge API, self-hosted Torii instances, or any other deployment.\n\n" +
+        "Pass a torii_url to target a specific instance, or omit it to auto-discover active Eternum worlds.\n\n" +
+        "For Eternum worlds, the agent understands the full data model (structures, troops, resources, guilds, etc.) and has specialized tools. " +
+        "For other Torii instances, it explores the schema dynamically and queries using standard SQL.\n\n" +
         "Examples:\n" +
         '  query-world({ question: "Who has the largest army?", torii_url: "https://api.cartridge.gg/x/eternum-season-1/torii" })\n' +
-        '  query-world({ question: "What are the top 10 guilds by member count?", torii_url: "..." })\n' +
-        '  query-world({ question: "How many realms exist?" })  // auto-discovers worlds',
+        '  query-world({ question: "How many players are there?", torii_url: "https://siege-torii-production.up.railway.app" })\n' +
+        '  query-world({ question: "How many realms exist?" })  // auto-discovers Eternum worlds',
       inputSchema: z.object({
-        question: z.string().describe("Natural language question about the world's data (e.g. players, troops, resources, guilds, structures, battles)"),
-        torii_url: z.string().url().optional().describe("Torii URL for the world. Get this from list-worlds. If omitted, auto-discovers active worlds."),
+        question: z.string().describe("Natural language question about the world's data"),
+        torii_url: z.string().url().optional().describe("Torii URL for any Torii instance. Use list-worlds to find Eternum worlds, or pass any Torii URL directly."),
       }),
       annotations: {
         readOnlyHint: true,
