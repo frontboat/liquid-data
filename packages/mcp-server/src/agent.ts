@@ -82,8 +82,10 @@ const RESPONSE_FORMAT = `Include in your response:
 const RULES = `RULES:
 - ALWAYS query the data first. NEVER make up numbers or guess values.
 - Use getPlayers for player counts, leaderboards, structure counts, points, or guild membership.
-- Use getTroops for armies, troop counts, military rankings, or explorer positions.
-- Use getNearbyTroops when asked about proximity, threats near a player, or what armies are closest to someone.
+- Use getTroops for armies, troop counts, military rankings, or explorer positions. Pass playerName to filter to one player.
+- Use getNearbyTroops for proximity/threat questions. Specify the reference via playerName, coords (raw DB values), or entityId.
+  - playerName + relativeTo='troops' measures from a player's armies instead of structures.
+  - Coordinates must be raw DB values (e.g. 1225670892, not relative like 892).
 - Fall back to queryData for everything else (resources, battles, events, buildings, etc.).
 - Tables may be interconnected and user questions may require exploring, identifying, and retrieving loops.
 - This is SQLite dialect. NOT DuckDB or Postgres.
@@ -281,65 +283,95 @@ ${RULES}`;
 
   const getNearbyTroops = tool({
     description:
-      "Get all armies sorted by distance from a player's nearest structure or army. " +
-      "Set relativeTo='structures' (default) to measure from bases, or 'troops' to measure from the player's own armies. " +
+      "Get all armies sorted by distance from a reference point. The reference can be specified in three ways:\n" +
+      "1. playerName — distance from that player's structures (or armies if relativeTo='troops')\n" +
+      "2. coords — distance from an exact {x, y} coordinate\n" +
+      "3. entityId — distance from a specific structure or explorer by entity ID\n" +
+      "Provide exactly one of these. " +
       "Each row includes: player_name, address, explorer_id, troops.category, troops.tier, troops.count, coord.x, coord.y, distance, nearest_ref. " +
-      "Use this for proximity/threat questions like 'what armies are near player X' or 'who is closest to boat's troops'.",
+      "Use this for proximity/threat questions like 'what armies are near X'.",
     inputSchema: z.object({
       toriiUrl: z.string().url().describe("Torii URL of the world to query"),
-      playerName: z.string().describe("Player name to center the search on (e.g. 'boat', 'credence0x')"),
-      relativeTo: z.enum(["structures", "troops"]).optional().describe("Measure distance from player's structures (default) or their armies"),
+      playerName: z.string().optional().describe("Player name to center on (e.g. 'boat')"),
+      relativeTo: z.enum(["structures", "troops"]).optional().describe("When using playerName: measure from structures (default) or armies"),
+      coords: z.object({ x: z.number(), y: z.number() }).optional().describe("Exact coordinates in raw DB format (e.g. 1225670892, not relative). Get these from structure/explorer query results."),
+      entityId: z.number().optional().describe("Entity ID of a structure or explorer to measure distance from"),
     }),
-    execute: async ({ toriiUrl, playerName, relativeTo }) => {
+    execute: async ({ toriiUrl, playerName, relativeTo, coords, entityId }) => {
       try {
         const conn = await connectTorii(toriiUrl);
-        const target = playerName.toLowerCase();
-        const mode = relativeTo ?? "structures";
 
-        // 1. Find the player's address by decoding felt names
-        const names = await executeToriiQuery(conn, `SELECT name, address FROM "s1_eternum-AddressName"`);
-        const match = names.find((r) => decodePaddedFeltAscii(String(r.name)).toLowerCase() === target);
-        if (!match) {
-          const allNames = names.map((r) => decodePaddedFeltAscii(String(r.name))).filter(Boolean);
-          return { error: `Player "${playerName}" not found. Available players: ${allNames.join(", ")}` };
-        }
-        const address = match.address as string;
+        // Build reference points from whichever input was provided
+        let refPoints: Array<{ x: number; y: number; id: number | string }>;
 
-        // 2. Get reference positions — either structures or the player's own armies
-        let refPoints: Array<{ x: number; y: number; id: number }>;
-
-        if (mode === "troops") {
-          const playerTroops = await executeToriiQuery(
+        if (coords) {
+          refPoints = [{ x: coords.x, y: coords.y, id: "coord" }];
+        } else if (entityId != null) {
+          // Look up the entity in structures first, then explorers
+          const structRows = await executeToriiQuery(
             conn,
-            `SELECT et.explorer_id, et."coord.x", et."coord.y"
-             FROM "s1_eternum-ExplorerTroops" et
-             JOIN "s1_eternum-Structure" s ON s.entity_id = et.owner
-             WHERE s.owner = '${address}'`,
+            `SELECT entity_id, "base.coord_x", "base.coord_y" FROM "s1_eternum-Structure" WHERE entity_id = ${entityId}`,
           );
-          if (playerTroops.length === 0) {
-            return { error: `Player "${playerName}" has no armies.` };
+          if (structRows.length > 0) {
+            refPoints = [{ x: Number(structRows[0]["base.coord_x"]), y: Number(structRows[0]["base.coord_y"]), id: entityId }];
+          } else {
+            const explorerRows = await executeToriiQuery(
+              conn,
+              `SELECT explorer_id, "coord.x", "coord.y" FROM "s1_eternum-ExplorerTroops" WHERE explorer_id = ${entityId}`,
+            );
+            if (explorerRows.length > 0) {
+              refPoints = [{ x: Number(explorerRows[0]["coord.x"]), y: Number(explorerRows[0]["coord.y"]), id: entityId }];
+            } else {
+              return { error: `Entity ${entityId} not found in structures or explorers.` };
+            }
           }
-          refPoints = playerTroops.map((t) => ({
-            x: Number(t["coord.x"]),
-            y: Number(t["coord.y"]),
-            id: Number(t["explorer_id"]),
-          }));
+        } else if (playerName) {
+          const target = playerName.toLowerCase();
+          const mode = relativeTo ?? "structures";
+
+          const names = await executeToriiQuery(conn, `SELECT name, address FROM "s1_eternum-AddressName"`);
+          const match = names.find((r) => decodePaddedFeltAscii(String(r.name)).toLowerCase() === target);
+          if (!match) {
+            const allNames = names.map((r) => decodePaddedFeltAscii(String(r.name))).filter(Boolean);
+            return { error: `Player "${playerName}" not found. Available players: ${allNames.join(", ")}` };
+          }
+          const address = match.address as string;
+
+          if (mode === "troops") {
+            const playerTroops = await executeToriiQuery(
+              conn,
+              `SELECT et.explorer_id, et."coord.x", et."coord.y"
+               FROM "s1_eternum-ExplorerTroops" et
+               JOIN "s1_eternum-Structure" s ON s.entity_id = et.owner
+               WHERE s.owner = '${address}'`,
+            );
+            if (playerTroops.length === 0) {
+              return { error: `Player "${playerName}" has no armies.` };
+            }
+            refPoints = playerTroops.map((t) => ({
+              x: Number(t["coord.x"]),
+              y: Number(t["coord.y"]),
+              id: Number(t["explorer_id"]),
+            }));
+          } else {
+            const structs = await executeToriiQuery(
+              conn,
+              `SELECT entity_id, "base.coord_x", "base.coord_y" FROM "s1_eternum-Structure" WHERE owner = '${address}'`,
+            );
+            if (structs.length === 0) {
+              return { error: `Player "${playerName}" has no structures.` };
+            }
+            refPoints = structs.map((s) => ({
+              x: Number(s["base.coord_x"]),
+              y: Number(s["base.coord_y"]),
+              id: Number(s["entity_id"]),
+            }));
+          }
         } else {
-          const structs = await executeToriiQuery(
-            conn,
-            `SELECT entity_id, "base.coord_x", "base.coord_y" FROM "s1_eternum-Structure" WHERE owner = '${address}'`,
-          );
-          if (structs.length === 0) {
-            return { error: `Player "${playerName}" has no structures.` };
-          }
-          refPoints = structs.map((s) => ({
-            x: Number(s["base.coord_x"]),
-            y: Number(s["base.coord_y"]),
-            id: Number(s["entity_id"]),
-          }));
+          return { error: "Provide one of: playerName, coords, or entityId." };
         }
 
-        // 3. Get all explorers with owner names
+        // Get all explorers with owner names
         const sql = `
           SELECT an.name as player_name, an.address,
                  et.explorer_id, et."troops.category", et."troops.tier", et."troops.count",
@@ -351,12 +383,12 @@ ${RULES}`;
         const results = await executeToriiQuery(conn, sql);
         const decoded = decodeRows(results, { stripZeros: false });
 
-        // 4. For each army, find distance to the CLOSEST reference point
+        // For each army, find distance to the CLOSEST reference point
         const withDistance = decoded.map((row) => {
           const ex = Number(row["coord.x"]);
           const ey = Number(row["coord.y"]);
           let minDist = Infinity;
-          let nearestRef: number | undefined;
+          let nearestRef: number | string | undefined;
           for (const ref of refPoints) {
             const d = Math.sqrt((ex - ref.x) ** 2 + (ey - ref.y) ** 2);
             if (d < minDist) {
@@ -373,7 +405,6 @@ ${RULES}`;
         withDistance.sort((a, b) => a.distance - b.distance);
 
         return {
-          relativeTo: mode,
           referencePoints: refPoints,
           troops: withDistance,
           totalExplorers: withDistance.length,
