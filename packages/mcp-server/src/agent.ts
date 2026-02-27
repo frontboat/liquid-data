@@ -235,16 +235,32 @@ ${RULES}`;
 
   const getTroops = tool({
     description:
-      "Get all explorer armies with their owner player names, troop types, counts, and positions. " +
+      "Get explorer armies with their owner player names, troop types, counts, and positions. " +
+      "Optionally filter to a single player by name. " +
       "Returns one row per explorer with: player_name, address, explorer_id, troops.category, troops.tier, troops.count, coord.x, coord.y. " +
       "Troop counts are auto-decoded (divided by RESOURCE_PRECISION). " +
       "Use this for any question about armies, troop counts, military rankings, or explorer positions.",
     inputSchema: z.object({
       toriiUrl: z.string().url().describe("Torii URL of the world to query"),
+      playerName: z.string().optional().describe("Optional player name to filter by (e.g. 'boat'). If omitted, returns all armies."),
     }),
-    execute: async ({ toriiUrl }) => {
+    execute: async ({ toriiUrl, playerName }) => {
       try {
         const conn = await connectTorii(toriiUrl);
+
+        // Resolve player name to address if provided
+        let addressFilter = "";
+        if (playerName) {
+          const target = playerName.toLowerCase();
+          const names = await executeToriiQuery(conn, `SELECT name, address FROM "s1_eternum-AddressName"`);
+          const match = names.find((r) => decodePaddedFeltAscii(String(r.name)).toLowerCase() === target);
+          if (!match) {
+            const allNames = names.map((r) => decodePaddedFeltAscii(String(r.name))).filter(Boolean);
+            return { error: `Player "${playerName}" not found. Available players: ${allNames.join(", ")}` };
+          }
+          addressFilter = ` WHERE s.owner = '${match.address}'`;
+        }
+
         const sql = `
           SELECT an.name as player_name, an.address,
                  et.explorer_id, et."troops.category", et."troops.tier", et."troops.count",
@@ -252,6 +268,7 @@ ${RULES}`;
           FROM "s1_eternum-ExplorerTroops" et
           JOIN "s1_eternum-Structure" s ON s.entity_id = et.owner
           JOIN "s1_eternum-AddressName" an ON an.address = s.owner
+          ${addressFilter}
         `;
         const results = await executeToriiQuery(conn, sql);
         const decoded = decodeRows(results, { stripZeros: false });
