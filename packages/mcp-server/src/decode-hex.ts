@@ -14,7 +14,7 @@ const FELT_STRING_PATTERNS = ["name", "guild_name", "message", "story"];
 
 function isFeltStringColumn(col: string): boolean {
   const lower = col.toLowerCase();
-  return FELT_STRING_PATTERNS.some((p) => lower === p || lower.endsWith(`.${p}`));
+  return FELT_STRING_PATTERNS.some((p) => lower === p || lower.endsWith(`.${p}`) || lower.endsWith(`_${p}`));
 }
 
 /** Decode a padded felt (hex or decimal) to an ASCII string */
