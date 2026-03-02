@@ -265,8 +265,3 @@ export async function listWorlds(options?: DiscoverWorldsOptions): Promise<Disco
 
   return worlds;
 }
-
-export async function findFirstOngoingWorld(options?: DiscoverWorldsOptions): Promise<DiscoveredWorld | null> {
-  const worlds = await listWorlds(options);
-  return worlds.find((w) => w.status === "ongoing") ?? worlds[0] ?? null;
-}
