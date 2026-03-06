@@ -5,6 +5,11 @@ import { z } from "zod";
 import { ToriiConnection, connectTorii, executeToriiQuery, getToriiTableSchema as getToriiTableSchemaApi } from "./torii.js";
 import { decodeRows, decodePaddedFeltAscii } from "./decode-hex.js";
 
+const anthropic = createAnthropic({
+  apiKey: process.env.AI_GATEWAY_API_KEY,
+  baseURL: "https://ai-gateway.vercel.sh/v1",
+});
+
 function fullSchemaListing(tables: ToriiConnection["tables"]): string {
   return tables
     .map((t) => `${t.name}: ${t.columns.map((c) => c.name).join(", ")}`)
@@ -403,10 +408,7 @@ ${rules}`;
   };
 
   return new ToolLoopAgent({
-    model: createAnthropic({
-      apiKey: process.env.AI_GATEWAY_API_KEY,
-      baseURL: "https://ai-gateway.vercel.sh/v1",
-    })(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
+    model: anthropic(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
     instructions,
     tools,
     stopWhen: stepCountIs(20),
