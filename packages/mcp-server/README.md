@@ -58,8 +58,8 @@ TRANSPORT=http pnpm start  # HTTP mode on :3001
 ## Environment Variables
 
 ```
-AI_GATEWAY_API_KEY    # Vercel AI Gateway key
-AI_GATEWAY_MODEL      # Model override (default: anthropic/claude-haiku-4.5)
+ANTHROPIC_API_KEY     # Anthropic API key
+ANTHROPIC_MODEL       # Model override (default: claude-haiku-4-5-20251001)
 TRANSPORT             # "stdio" (default) or "http"
 PORT                  # HTTP port (default: 3001)
 CARTRIDGE_API_BASE    # Cartridge API base URL (default: https://api.cartridge.gg)
