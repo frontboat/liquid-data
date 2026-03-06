@@ -7,6 +7,16 @@ import { decodeRows, decodePaddedFeltAscii } from "./decode-hex.js";
 
 const anthropic = createAnthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
+  fetch: async (url, init) => {
+    if (init?.body) {
+      const body = JSON.parse(init.body as string);
+      // Log system + tools hash to diagnose cache key differences
+      const prefix = JSON.stringify({ system: body.system, tools: body.tools });
+      const hash = Buffer.from(prefix).toString("base64").slice(0, 40);
+      console.error(`[req] prefix length=${prefix.length} hash=${hash}`);
+    }
+    return fetch(url, init);
+  },
 });
 
 function fullSchemaListing(tables: ToriiConnection["tables"]): string {
