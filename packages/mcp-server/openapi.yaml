@@ -17,20 +17,6 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - jsonrpc
-                - method
-              properties:
-                jsonrpc:
-                  type: string
-                  enum:
-                    - "2.0"
-                id:
-                  type: string
-                method:
-                  type: string
-                params:
-                  type: object
       responses:
         "200":
           description: Successful JSON-RPC response
@@ -52,3 +38,32 @@ paths:
       responses:
         "405":
           description: Method Not Allowed
+  /.well-known/oauth-authorization-server:
+    get:
+      operationId: oauthDiscovery
+      summary: OAuth 2.0 authorization server metadata
+      description: MCP clients probe this for OAuth discovery (RFC 8414). Returns 404 when auth is not configured.
+      responses:
+        "404":
+          description: Not found
+  /.well-known/openid-configuration:
+    get:
+      operationId: oidcDiscovery
+      summary: OpenID Connect discovery
+      description: MCP clients probe this as OAuth discovery fallback. Returns 404 when auth is not configured.
+      responses:
+        "404":
+          description: Not found
+  /register:
+    post:
+      operationId: dynamicClientRegistration
+      summary: OAuth dynamic client registration
+      description: MCP clients may attempt dynamic client registration (RFC 7591). Returns 404 when auth is not configured.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "404":
+          description: Not found
