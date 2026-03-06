@@ -12,8 +12,9 @@ const anthropic = createAnthropic({
       const body = JSON.parse(init.body as string);
       const prefix = JSON.stringify({ system: body.system, tools: body.tools });
       const hash = Buffer.from(prefix).toString("base64").slice(0, 40);
-      const cacheControls = (body.system || []).map((s: any) => s.cache_control).filter(Boolean);
-      console.error(`[req] prefix length=${prefix.length} hash=${hash} cache_control=${JSON.stringify(cacheControls)}`);
+      const sysCc = (body.system || []).map((s: any) => s.cache_control).filter(Boolean);
+      const toolCc = (body.tools || []).map((t: any) => t.cache_control).filter(Boolean);
+      console.error(`[req] hash=${hash} sys_cc=${JSON.stringify(sysCc)} tool_cc=${JSON.stringify(toolCc)}`);
     }
     return fetch(url, init);
   },
@@ -408,12 +409,12 @@ ${rules}`;
     ? { ...baseTools, getPlayers, getTroops, getNearbyTroops }
     : baseTools;
 
-  // Add cache breakpoint to the last tool — caches all tools as a prefix block
+  // Add cache breakpoint to the last tool — caches system + tools as a prefix block with 1h TTL
   const toolNames = Object.keys(tools);
   const lastToolName = toolNames[toolNames.length - 1];
   (tools as Record<string, any>)[lastToolName] = {
     ...tools[lastToolName as keyof typeof tools],
-    providerOptions: ephemeral,
+    providerOptions: ephemeral1h,
   };
 
   console.error(`[agent] instructions length=${instructions.length} hash=${Buffer.from(instructions).toString("base64").slice(0, 20)}`);
