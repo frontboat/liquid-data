@@ -407,6 +407,8 @@ ${rules}`;
     providerOptions: ephemeral,
   };
 
+  console.error(`[agent] instructions length=${instructions.length} hash=${Buffer.from(instructions).toString("base64").slice(0, 20)}`);
+
   return new ToolLoopAgent({
     model: anthropic(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
     instructions,
