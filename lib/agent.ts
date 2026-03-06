@@ -99,6 +99,7 @@ ${explorerCatalog.prompt({
     tools: { queryData, getSchema },
     stopWhen: stepCountIs(8),
     temperature: 0.7,
+    providerOptions: { gateway: { caching: "auto" } },
   });
 }
 
@@ -518,5 +519,6 @@ ${explorerCatalog.prompt({
     tools,
     stopWhen: stepCountIs(12),
     temperature: 0.7,
+    providerOptions: { gateway: { caching: "auto" } },
   });
 }

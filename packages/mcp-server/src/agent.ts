@@ -452,5 +452,6 @@ ${rules}`;
     tools,
     stopWhen: stepCountIs(20),
     temperature: 0.1,
+    providerOptions: { gateway: { caching: "auto" } },
   });
 }
