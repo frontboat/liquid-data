@@ -1,5 +1,5 @@
 import { ToolLoopAgent, stepCountIs } from "ai";
-import { gateway } from "@ai-sdk/gateway";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { tool } from "ai";
 import { z } from "zod";
 import { ToriiConnection, connectTorii, executeToriiQuery, getToriiTableSchema as getToriiTableSchemaApi } from "./torii.js";
@@ -403,7 +403,10 @@ ${rules}`;
   };
 
   return new ToolLoopAgent({
-    model: gateway(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
+    model: createAnthropic({
+      apiKey: process.env.AI_GATEWAY_API_KEY,
+      baseURL: "https://ai-gateway.vercel.sh/v1",
+    })(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
     instructions,
     tools,
     stopWhen: stepCountIs(20),
