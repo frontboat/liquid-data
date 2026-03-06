@@ -409,7 +409,7 @@ ${rules}`;
   console.error(`[agent] instructions length=${instructions.length} hash=${Buffer.from(instructions).toString("base64").slice(0, 20)}`);
 
   return new ToolLoopAgent({
-    model: anthropic(process.env.ANTHROPIC_MODEL || "claude-haiku-4.5"),
+    model: anthropic(process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001"),
     instructions,
     tools,
     stopWhen: stepCountIs(20),
