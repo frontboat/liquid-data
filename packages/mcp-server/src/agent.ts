@@ -5,16 +5,9 @@ import { z } from "zod";
 import { ToriiConnection, connectTorii, executeToriiQuery, getToriiTableSchema as getToriiTableSchemaApi } from "./torii.js";
 import { decodeRows, decodePaddedFeltAscii } from "./decode-hex.js";
 
-function compactTableListing(tables: ToriiConnection["tables"]): string {
-  const grouped: Record<string, string[]> = {};
-  for (const t of tables) {
-    const dashIdx = t.name.indexOf("-");
-    const ns = dashIdx > 0 ? t.name.substring(0, dashIdx) : "core";
-    (grouped[ns] ??= []).push(t.name);
-  }
-  return Object.entries(grouped)
-    .sort()
-    .map(([ns, names]) => `[${ns}] ${names.join(", ")}`)
+function fullSchemaListing(tables: ToriiConnection["tables"]): string {
+  return tables
+    .map((t) => `${t.name}: ${t.columns.map((c) => c.name).join(", ")}`)
     .join("\n");
 }
 
@@ -90,7 +83,6 @@ const ETERNUM_RULES = `RULES:
 - Tables may be interconnected and user questions may require exploring, identifying, and retrieving loops.
 - This is SQLite dialect. NOT DuckDB or Postgres.
 - Table names containing hyphens MUST be double-quoted: SELECT * FROM "s1_eternum-Structure"
-- Use the getSchema tool before querying an unfamiliar table to understand its columns.
 - Keep queries efficient — use LIMIT, avoid SELECT * on wide tables (some have 200+ columns).
 - Only select the columns you actually need.
 - For numeric formatting, round to 2 decimal places where appropriate.
@@ -99,11 +91,9 @@ const ETERNUM_RULES = `RULES:
 
 const GENERIC_RULES = `RULES:
 - ALWAYS query the data first. NEVER make up numbers or guess values.
-- Start with listTables to discover what data is available, then use getSchema to understand table structure.
 - Tables may be interconnected and user questions may require exploring, identifying, and retrieving loops.
 - This is SQLite dialect. NOT DuckDB or Postgres.
 - Table names containing hyphens or special chars MUST be double-quoted: SELECT * FROM "my-table"
-- Use the getSchema tool before querying an unfamiliar table to understand its columns.
 - Keep queries efficient — use LIMIT, avoid SELECT * on wide tables.
 - Only select the columns you actually need.
 - For numeric formatting, round to 2 decimal places where appropriate.
@@ -115,34 +105,8 @@ function hasEternumTables(tables: ToriiConnection["tables"]): boolean {
   return tables.some((t) => t.name.startsWith("s1_eternum-"));
 }
 
-interface WorldInfo {
-  name: string;
-  toriiUrl: string;
-}
-
-export function createMcpAgent(worlds: WorldInfo[], preConnected?: { url: string; tables: ToriiConnection["tables"] }) {
-  const isEternum = preConnected ? hasEternumTables(preConnected.tables) : true; // assume Eternum when auto-discovering
-
-  let contextSection: string;
-  let workflow: string;
-
-  if (preConnected) {
-    contextSection = `\nCONNECTED TO: ${preConnected.url}\nAVAILABLE TABLES (${preConnected.tables.length}):\n${compactTableListing(preConnected.tables)}\n`;
-    workflow = `WORKFLOW:
-1. Use getSchema to inspect a table's columns, types, row count, and sample rows
-2. Use queryData to run SQL queries against the database
-3. Respond with a clear, thorough natural-language answer to the user's question
-You can also use listTables with a filter to search for tables by name.`;
-  } else {
-    const worldList = worlds.map((w) => `  - ${w.name}: ${w.toriiUrl}`).join("\n");
-    contextSection = `\nAVAILABLE WORLDS:\n${worldList}\n`;
-    workflow = `WORKFLOW:
-1. Pick the appropriate world URL from the list above
-2. Use listTables to browse available tables (with optional name filter)
-3. Use getSchema to inspect a specific table's columns, types, row count, and sample rows
-4. Use queryData to run SQL queries against the database
-5. Respond with a clear, thorough natural-language answer to the user's question`;
-  }
+export function createMcpAgent(preConnected: { url: string; tables: ToriiConnection["tables"] }) {
+  const isEternum = hasEternumTables(preConnected.tables);
 
   const intro = isEternum
     ? `You are a data analyst assistant for Eternum, an on-chain strategy game. You query Torii databases — on-chain game data indexers.`
@@ -153,40 +117,26 @@ You can also use listTables with a filter to search for tables by name.`;
 
   const instructions = `${intro}
 ${dataModel}
-${contextSection}
-${workflow}
+
+CONNECTED TO: ${preConnected.url}
+
+FULL SCHEMA (${preConnected.tables.length} tables):
+${fullSchemaListing(preConnected.tables)}
+
+WORKFLOW:
+1. The full schema with all column names is provided above — use it to write queries directly
+2. Use queryData to run SQL queries against the database
+3. Respond with a clear, thorough natural-language answer to the user's question
 
 ${RESPONSE_FORMAT}
 
 ${rules}`;
 
-  // --- Tools: each takes toriiUrl explicitly, no stored state ---
-
-  const listTables = tool({
-    description:
-      "List available tables at a Torii database, optionally filtered by name substring. Returns table names and column counts.",
-    inputSchema: z.object({
-      toriiUrl: z.string().url().describe("Torii URL of the world to query"),
-      filter: z.string().optional().describe("Optional substring to filter table names (case-insensitive)"),
-    }),
-    execute: async ({ toriiUrl, filter }) => {
-      try {
-        const conn = await connectTorii(toriiUrl);
-        let filtered = conn.tables;
-        if (filter) {
-          const lower = filter.toLowerCase();
-          filtered = filtered.filter((t) => t.name.toLowerCase().includes(lower));
-        }
-        return filtered.map((t) => ({ name: t.name, columnCount: t.columns.length }));
-      } catch (error) {
-        return { error: String(error) };
-      }
-    },
-  });
+  // --- Tools ---
 
   const getSchema = tool({
     description:
-      "Get the full schema of a specific table: column names, types, row count, and 5 sample rows. Use this before querying an unfamiliar table.",
+      "Get sample rows and row count for a specific table. Use when you need to see what the data looks like before writing a query.",
     inputSchema: z.object({
       toriiUrl: z.string().url().describe("Torii URL of the world to query"),
       tableName: z.string().describe("The exact table name to inspect"),
@@ -276,7 +226,6 @@ ${rules}`;
       try {
         const conn = await connectTorii(toriiUrl);
 
-        // Resolve player name to address if provided
         let addressFilter = "";
         if (playerName) {
           const target = playerName.toLowerCase();
@@ -327,13 +276,11 @@ ${rules}`;
       try {
         const conn = await connectTorii(toriiUrl);
 
-        // Build reference points from whichever input was provided
         let refPoints: Array<{ x: number; y: number; id: number | string }>;
 
         if (coords) {
           refPoints = [{ x: coords.x, y: coords.y, id: "coord" }];
         } else if (entityId != null) {
-          // Look up the entity in structures first, then explorers
           const structRows = await executeToriiQuery(
             conn,
             `SELECT entity_id, "base.coord_x", "base.coord_y" FROM "s1_eternum-Structure" WHERE entity_id = ${entityId}`,
@@ -397,7 +344,6 @@ ${rules}`;
           return { error: "Provide one of: playerName, coords, or entityId." };
         }
 
-        // Get all explorers with owner names
         const sql = `
           SELECT an.name as player_name, an.address,
                  et.explorer_id, et."troops.category", et."troops.tier", et."troops.count",
@@ -409,7 +355,6 @@ ${rules}`;
         const results = await executeToriiQuery(conn, sql);
         const decoded = decodeRows(results, { stripZeros: false });
 
-        // For each army, find distance to the CLOSEST reference point
         const withDistance = decoded.map((row) => {
           const ex = Number(row["coord.x"]);
           const ey = Number(row["coord.y"]);
@@ -441,10 +386,21 @@ ${rules}`;
     },
   });
 
-  const baseTools = { queryData, getSchema, listTables };
+  const ephemeral = { anthropic: { cacheControl: { type: "ephemeral" as const } } };
+  const ephemeral1h = { anthropic: { cacheControl: { type: "ephemeral" as const, ttl: "1h" } } };
+
+  const baseTools = { queryData, getSchema };
   const tools = isEternum
     ? { ...baseTools, getPlayers, getTroops, getNearbyTroops }
     : baseTools;
+
+  // Add cache breakpoint to the last tool — caches all tools as a prefix block
+  const toolNames = Object.keys(tools);
+  const lastToolName = toolNames[toolNames.length - 1];
+  (tools as Record<string, any>)[lastToolName] = {
+    ...tools[lastToolName as keyof typeof tools],
+    providerOptions: ephemeral,
+  };
 
   return new ToolLoopAgent({
     model: gateway(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
@@ -452,6 +408,18 @@ ${rules}`;
     tools,
     stopWhen: stepCountIs(20),
     temperature: 0.1,
-    providerOptions: { gateway: { caching: "auto" } },
+    prepareStep: ({ messages }) => ({
+      messages: messages.map((msg, i) => {
+        if (msg.role === "system") {
+          // System prompt + schema: cache with 1h TTL (stable across requests)
+          return { ...msg, providerOptions: { ...msg.providerOptions, ...ephemeral1h } };
+        }
+        if (i === messages.length - 1) {
+          // Last message: cache the conversation prefix for next step
+          return { ...msg, providerOptions: { ...msg.providerOptions, ...ephemeral } };
+        }
+        return msg;
+      }),
+    }),
   });
 }
