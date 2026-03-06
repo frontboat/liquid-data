@@ -33,6 +33,7 @@ function parseCreateTableSql(sql: string): ToriiColumnInfo[] {
     const trimmed = part.trim();
     const colMatch =
       trimmed.match(/^"([^"]+)"\s+(\w+)(.*)$/i) ||
+      trimmed.match(/^\[([^\]]+)\]\s+(\w+)(.*)$/i) ||
       trimmed.match(/^(\w+)\s+(\w+)(.*)$/i);
     if (!colMatch) continue;
 
