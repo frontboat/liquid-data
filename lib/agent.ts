@@ -1,5 +1,5 @@
 import { ToolLoopAgent, stepCountIs } from "ai";
-import { gateway } from "@ai-sdk/gateway";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { tool } from "ai";
 import { z } from "zod";
 import { explorerCatalog } from "./render/catalog";
@@ -8,7 +8,42 @@ import { executeToriiQuery, getToriiTableSchema as getToriiTableSchemaApi, getTo
 import { decodeRows, decodePaddedFeltAscii } from "./decode-hex";
 import { listWorlds as listWorldsApi } from "./list-worlds";
 
-const DEFAULT_MODEL = "anthropic/claude-haiku-4.5";
+const CACHE_1H = { type: "ephemeral" as const, ttl: "1h" };
+const CACHE_5M = { type: "ephemeral" as const };
+
+const anthropic = createAnthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  fetch: async (url, init) => {
+    if (init?.body) {
+      const body = JSON.parse(init.body as string);
+
+      // Breakpoint 1: Cache tools with 1h TTL
+      if (body.tools?.length) {
+        body.tools[body.tools.length - 1].cache_control = CACHE_1H;
+      }
+
+      // Breakpoint 2: Cache system prompt with 1h TTL
+      if (body.system?.length) {
+        body.system[body.system.length - 1].cache_control = CACHE_1H;
+      }
+
+      // Breakpoint 3: Cache conversation prefix with 5min TTL
+      if (body.messages?.length) {
+        const lastMsg = body.messages[body.messages.length - 1];
+        if (Array.isArray(lastMsg.content) && lastMsg.content.length) {
+          lastMsg.content[lastMsg.content.length - 1].cache_control = CACHE_5M;
+        } else if (typeof lastMsg.content === "string") {
+          lastMsg.content = [{ type: "text", text: lastMsg.content, cache_control: CACHE_5M }];
+        }
+      }
+
+      init = { ...init, body: JSON.stringify(body) };
+    }
+    return fetch(url, init);
+  },
+});
+
+const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
 export function createAgent(schemaInfo: { columns: Array<{ name: string; type: string }>; rowCount: number }) {
   const schemaDescription = schemaInfo.columns
@@ -94,12 +129,11 @@ ${explorerCatalog.prompt({
   });
 
   return new ToolLoopAgent({
-    model: gateway(process.env.AI_GATEWAY_MODEL || DEFAULT_MODEL),
+    model: anthropic(process.env.ANTHROPIC_MODEL || DEFAULT_MODEL),
     instructions: AGENT_INSTRUCTIONS,
     tools: { queryData, getSchema },
     stopWhen: stepCountIs(8),
     temperature: 0.7,
-    providerOptions: { gateway: { caching: "auto" } },
   });
 }
 
@@ -514,11 +548,10 @@ ${explorerCatalog.prompt({
     : baseTools;
 
   return new ToolLoopAgent({
-    model: gateway(process.env.AI_GATEWAY_MODEL || DEFAULT_MODEL),
+    model: anthropic(process.env.ANTHROPIC_MODEL || DEFAULT_MODEL),
     instructions: TORII_INSTRUCTIONS,
     tools,
     stopWhen: stepCountIs(12),
     temperature: 0.7,
-    providerOptions: { gateway: { caching: "auto" } },
   });
 }

@@ -5,16 +5,40 @@ import { z } from "zod";
 import { ToriiConnection, connectTorii, executeToriiQuery, getToriiTableSchema as getToriiTableSchemaApi } from "./torii.js";
 import { decodeRows, decodePaddedFeltAscii } from "./decode-hex.js";
 
+const CACHE_1H = { type: "ephemeral" as const, ttl: "1h" };
+const CACHE_5M = { type: "ephemeral" as const };
+
 const anthropic = createAnthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
   fetch: async (url, init) => {
     if (init?.body) {
       const body = JSON.parse(init.body as string);
-      const prefix = JSON.stringify({ system: body.system, tools: body.tools });
-      const hash = Buffer.from(prefix).toString("base64").slice(0, 40);
+
+      // Breakpoint 1: Cache tools with 1h TTL
+      if (body.tools?.length) {
+        body.tools[body.tools.length - 1].cache_control = CACHE_1H;
+      }
+
+      // Breakpoint 2: Cache system prompt with 1h TTL
+      if (body.system?.length) {
+        body.system[body.system.length - 1].cache_control = CACHE_1H;
+      }
+
+      // Breakpoint 3: Cache conversation prefix with 5min TTL
+      if (body.messages?.length) {
+        const lastMsg = body.messages[body.messages.length - 1];
+        if (Array.isArray(lastMsg.content) && lastMsg.content.length) {
+          lastMsg.content[lastMsg.content.length - 1].cache_control = CACHE_5M;
+        } else if (typeof lastMsg.content === "string") {
+          lastMsg.content = [{ type: "text", text: lastMsg.content, cache_control: CACHE_5M }];
+        }
+      }
+
       const sysCc = (body.system || []).map((s: any) => s.cache_control).filter(Boolean);
       const toolCc = (body.tools || []).map((t: any) => t.cache_control).filter(Boolean);
-      console.error(`[req] hash=${hash} sys_cc=${JSON.stringify(sysCc)} tool_cc=${JSON.stringify(toolCc)}`);
+      console.error(`[req] sys_cc=${JSON.stringify(sysCc)} tool_cc=${JSON.stringify(toolCc)}`);
+
+      init = { ...init, body: JSON.stringify(body) };
     }
     return fetch(url, init);
   },
@@ -401,21 +425,10 @@ ${rules}`;
     },
   });
 
-  const ephemeral = { anthropic: { cacheControl: { type: "ephemeral" as const } } };
-  const ephemeral1h = { anthropic: { cacheControl: { type: "ephemeral" as const, ttl: "1h" } } };
-
   const baseTools = { queryData, getSchema };
   const tools = isEternum
     ? { ...baseTools, getPlayers, getTroops, getNearbyTroops }
     : baseTools;
-
-  // Add cache breakpoint to the last tool — caches system + tools as a prefix block with 1h TTL
-  const toolNames = Object.keys(tools);
-  const lastToolName = toolNames[toolNames.length - 1];
-  (tools as Record<string, any>)[lastToolName] = {
-    ...tools[lastToolName as keyof typeof tools],
-    providerOptions: ephemeral1h,
-  };
 
   console.error(`[agent] instructions length=${instructions.length} hash=${Buffer.from(instructions).toString("base64").slice(0, 20)}`);
 
@@ -425,18 +438,5 @@ ${rules}`;
     tools,
     stopWhen: stepCountIs(20),
     temperature: 0.1,
-    prepareStep: ({ messages }) => ({
-      messages: messages.map((msg, i) => {
-        if (msg.role === "system") {
-          // System prompt + schema: cache with 1h TTL (stable across requests)
-          return { ...msg, providerOptions: { ...msg.providerOptions, ...ephemeral1h } };
-        }
-        if (i === messages.length - 1) {
-          // Last message: cache the conversation prefix for next step
-          return { ...msg, providerOptions: { ...msg.providerOptions, ...ephemeral } };
-        }
-        return msg;
-      }),
-    }),
   });
 }
