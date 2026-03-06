@@ -55,6 +55,19 @@ pnpm start                 # stdio mode (default)
 TRANSPORT=http pnpm start  # HTTP mode on :3001
 ```
 
+## Prompt Caching
+
+The inner agent uses Anthropic's prompt caching via a `fetch` interceptor that injects `cache_control` into every API request:
+
+- **Tools + System prompt** — cached with 1h TTL (~14.7k tokens, stable across queries)
+- **Conversation prefix** — cached with 5min TTL (grows each tool-loop step, read by the next step)
+
+This yields ~86% cache hit rate and 45% cost reduction per request. The fetch-layer approach is used because the Vercel AI SDK's `providerOptions` does not reliably pass `cache_control` through to the Anthropic API on system messages.
+
+### Cache Warming
+
+To keep the 1h cache alive between organic requests, deploy a Railway Function cron job (`*/50 * * * *`) that sends a trivial query. A cache read ($0.0015) is 20x cheaper than a cold rewrite ($0.0295).
+
 ## Environment Variables
 
 ```
