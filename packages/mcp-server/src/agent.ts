@@ -10,10 +10,10 @@ const anthropic = createAnthropic({
   fetch: async (url, init) => {
     if (init?.body) {
       const body = JSON.parse(init.body as string);
-      // Log system + tools hash to diagnose cache key differences
       const prefix = JSON.stringify({ system: body.system, tools: body.tools });
       const hash = Buffer.from(prefix).toString("base64").slice(0, 40);
-      console.error(`[req] prefix length=${prefix.length} hash=${hash}`);
+      const cacheControls = (body.system || []).map((s: any) => s.cache_control).filter(Boolean);
+      console.error(`[req] prefix length=${prefix.length} hash=${hash} cache_control=${JSON.stringify(cacheControls)}`);
     }
     return fetch(url, init);
   },
