@@ -6,8 +6,7 @@ import { ToriiConnection, connectTorii, executeToriiQuery, getToriiTableSchema a
 import { decodeRows, decodePaddedFeltAscii } from "./decode-hex.js";
 
 const anthropic = createAnthropic({
-  apiKey: process.env.AI_GATEWAY_API_KEY,
-  baseURL: "https://ai-gateway.vercel.sh/v1",
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
 function fullSchemaListing(tables: ToriiConnection["tables"]): string {
@@ -410,7 +409,7 @@ ${rules}`;
   console.error(`[agent] instructions length=${instructions.length} hash=${Buffer.from(instructions).toString("base64").slice(0, 20)}`);
 
   return new ToolLoopAgent({
-    model: anthropic(process.env.AI_GATEWAY_MODEL || "anthropic/claude-haiku-4.5"),
+    model: anthropic(process.env.ANTHROPIC_MODEL || "claude-haiku-4.5"),
     instructions,
     tools,
     stopWhen: stepCountIs(20),
