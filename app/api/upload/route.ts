@@ -1,4 +1,5 @@
 import { initDatabase, getTableSchema } from "@/lib/duckdb";
+import { disconnectTorii } from "@/lib/torii";
 
 export const maxDuration = 30;
 
@@ -30,6 +31,10 @@ export async function POST(req: Request) {
         headers: { "Content-Type": "application/json" },
       });
     }
+
+    // Disconnect any active Torii session so the generate endpoint
+    // uses the CSV agent instead of the Torii/Eternum agent.
+    disconnectTorii();
 
     await initDatabase(buffer, "data", file.name);
     const schema = await getTableSchema("data");
